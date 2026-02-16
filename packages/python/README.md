@@ -164,6 +164,129 @@ presets.GENEROUS_API
 
 ---
 
+## SaaS Features
+
+### Plan-Based Rate Limiting
+
+```python
+from halt import presets
+
+# Use plan-based presets
+PLAN_FREE = presets.PLAN_FREE          # 100 req/hour
+PLAN_STARTER = presets.PLAN_STARTER    # 500 req/hour
+PLAN_PRO = presets.PLAN_PRO            # 2000 req/hour
+PLAN_BUSINESS = presets.PLAN_BUSINESS  # 5000 req/hour
+PLAN_ENTERPRISE = presets.PLAN_ENTERPRISE  # 20000 req/hour
+
+# Get policy by plan name
+policy = presets.get_plan_policy("pro")
+
+# Dynamic policy resolution
+def get_user_policy(request):
+    user = get_current_user(request)
+    return presets.get_plan_policy(user.plan)
+
+limiter = RateLimiter(
+    store=store,
+    policy=get_user_policy(request)
+)
+```
+
+### Quota Management
+
+```python
+from halt.core.quota import QuotaManager, Quota, QuotaPeriod
+
+# Initialize quota manager
+quota_manager = QuotaManager(store)
+
+# Define quotas
+monthly_quota = Quota(
+    name="api_calls",
+    limit=100000,
+    period=QuotaPeriod.MONTHLY
+)
+
+# Check quota
+allowed, current_quota = quota_manager.check_quota(
+    identifier="user_123",
+    quota=monthly_quota
+)
+
+if allowed:
+    # Consume quota
+    quota_manager.consume_quota("user_123", monthly_quota, cost=1)
+else:
+    # Quota exceeded
+    print(f"Quota exceeded. Resets at: {current_quota.reset_at}")
+```
+
+### Penalty System
+
+```python
+from halt.core.penalty import PenaltyManager, PenaltyConfig
+
+# Initialize penalty manager
+penalty_manager = PenaltyManager(
+    store=store,
+    config=PenaltyConfig(
+        threshold=10,      # Abuse score threshold
+        duration=3600,     # 1 hour penalty
+        multiplier=0.5,    # Reduce limit to 50%
+        decay_rate=1.0     # 1 point/hour decay
+    )
+)
+
+# Record violation
+penalty = penalty_manager.record_violation(
+    identifier="user_123",
+    severity=1.0
+)
+
+# Check penalty status
+if penalty.is_active():
+    print(f"User penalized until: {penalty.penalty_until}")
+    print(f"Abuse score: {penalty.abuse_score}")
+```
+
+### Telemetry & Observability
+
+```python
+from halt.core.telemetry import LoggingTelemetry, MetricsTelemetry
+import logging
+
+# Logging telemetry
+logger = logging.getLogger(__name__)
+telemetry = LoggingTelemetry(logger)
+
+# Metrics telemetry (Prometheus, StatsD, etc.)
+from prometheus_client import Counter, Gauge
+
+class PrometheusTelemetry:
+    def __init__(self):
+        self.checks = Counter('halt_checks_total', 'Total rate limit checks')
+        self.blocked = Counter('halt_blocked_total', 'Total blocked requests')
+        self.remaining = Gauge('halt_remaining', 'Remaining requests')
+    
+    def on_check(self, key, decision, metadata=None):
+        self.checks.inc()
+    
+    def on_blocked(self, key, decision, metadata=None):
+        self.blocked.inc()
+    
+    def on_allowed(self, key, decision, metadata=None):
+        self.remaining.set(decision.remaining)
+
+# Use with limiter
+limiter = RateLimiter(
+    store=store,
+    policy=policy,
+    telemetry=PrometheusTelemetry()
+)
+```
+
+---
+
 ## Custom Policies
 
 ### Basic Custom Policy

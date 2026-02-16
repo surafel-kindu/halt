@@ -7,39 +7,38 @@
 
 ## Features
 
-🚀 **Multiple Algorithms**
+🚀 **Four Rate Limiting Algorithms**
 - Token Bucket (burst-friendly, recommended)
 - Fixed Window (simple, fast)
 - Sliding Window (accurate, memory-intensive)
+- Leaky Bucket (traffic shaping, constant rate)
 
-🔑 **Flexible Key Strategies**
-- Per-IP address
-- Per-authenticated user
-- Per-API key
-- Composite keys (e.g., `user:ip`)
-- Custom key extraction
+💾 **Multiple Storage Backends**
+- In-Memory (development, single-threaded)
+- Redis (production, distributed) - Coming soon
+- PostgreSQL (ACID, relational)
+- MongoDB (document store, TTL indexes)
+- DynamoDB (AWS serverless, auto-scaling)
+- Memcached (distributed cache, fast)
 
-💾 **Storage Options**
-- In-memory (development)
-- Redis (production, coming soon)
+🎯 **SaaS-Ready Features**
+- Plan-based rate limiting (FREE, STARTER, PRO, BUSINESS, ENTERPRISE)
+- Quota management (hourly, daily, monthly, yearly)
+- Penalty system (abuse detection, progressive penalties)
+- Telemetry hooks (logging, metrics, observability)
 
-🎯 **Framework Support**
+🔧 **Framework Support**
 - Express
 - Next.js (App Router & Pages Router)
 - Next.js Middleware
 
-📊 **Standard Headers**
-- `RateLimit-Limit`
-- `RateLimit-Remaining`
-- `RateLimit-Reset`
-- `Retry-After` (on 429)
-
-⚡ **Smart Features**
+✨ **Smart Features**
 - Automatic health check exemptions
 - Private IP exemptions
 - Custom exemption lists
-- Weighted endpoints (cost-based)
-- Burst handling
+- Weighted endpoints (cost-based limiting)
+- Per-request algorithm override
+- Standard rate limit headers (RateLimit-*, Retry-After)
 
 ---
 
@@ -51,6 +50,179 @@ npm install halt
 yarn add halt
 # or
 pnpm add halt
+```
+
+### Optional Dependencies
+
+```bash
+# PostgreSQL support
+npm install pg
+
+# MongoDB support
+npm install mongodb
+
+# DynamoDB support
+npm install @aws-sdk/client-dynamodb @aws-sdk/util-dynamodb
+
+# Memcached support
+npm install memcached
+```
+
+---
+
+## Storage Backends
+
+### In-Memory (Development)
+
+```typescript
+import { InMemoryStore } from 'halt';
+
+const store = new InMemoryStore();
+```
+
+### PostgreSQL
+
+```typescript
+import { PostgresStore } from 'halt/stores/postgres';
+
+const store = new PostgresStore({
+  host: 'localhost',
+  port: 5432,
+  database: 'mydb',
+  user: 'user',
+  password: 'password',
+  tableName: 'rate_limits', // optional
+});
+```
+
+### MongoDB
+
+```typescript
+import { MongoDBStore } from 'halt/stores/mongodb';
+
+const store = new MongoDBStore({
+  connectionString: 'mongodb://localhost:27017',
+  database: 'halt',
+  collection: 'rate_limits',
+});
+```
+
+### DynamoDB
+
+```typescript
+import { DynamoDBStore } from 'halt/stores/dynamodb';
+
+const store = new DynamoDBStore({
+  tableName: 'rate_limits',
+  region: 'us-east-1',
+});
+```
+
+### Memcached
+
+```typescript
+import { MemcachedStore } from 'halt/stores/memcached';
+
+const store = new MemcachedStore({
+  servers: 'localhost:11211',
+});
+```
+
+---
+
+## SaaS Features
+
+### Plan-Based Rate Limiting
+
+```typescript
+import { getPlanPolicy, PLAN_FREE, PLAN_PRO, PLAN_ENTERPRISE } from 'halt';
+
+// Use plan-based presets
+const freePolicy = PLAN_FREE;          // 100 req/hour
+const proPolicy = PLAN_PRO;            // 2000 req/hour
+const enterprisePolicy = PLAN_ENTERPRISE;  // 20000 req/hour
+
+// Get policy by plan name
+const policy = getPlanPolicy('pro');
+
+// Dynamic policy resolution
+function getUserPolicy(user: User) {
+  return getPlanPolicy(user.plan);
+}
+```
+
+### Quota Management
+
+```typescript
+import { QuotaManager, Quota, QuotaPeriod } from 'halt/core/quota';
+
+const quotaManager = new QuotaManager(store);
+
+const monthlyQuota: Quota = {
+  name: 'api_calls',
+  limit: 100000,
+  period: QuotaPeriod.MONTHLY,
+};
+
+// Check quota
+const { allowed, quota: currentQuota } = await quotaManager.checkQuota(
+  'user_123',
+  monthlyQuota
+);
+
+if (allowed) {
+  // Consume quota
+  await quotaManager.consumeQuota('user_123', monthlyQuota, 1);
+} else {
+  console.log(`Quota exceeded. Resets at: ${currentQuota.resetAt}`);
+}
+```
+
+### Penalty System
+
+```typescript
+import { PenaltyManager, PENALTY_MODERATE } from 'halt/core/penalty';
+
+const penaltyManager = new PenaltyManager(store, PENALTY_MODERATE);
+
+// Record violation
+const penalty = await penaltyManager.recordViolation('user_123', 1.0);
+
+// Check penalty status
+if (penaltyManager.isActive(penalty)) {
+  console.log(`User penalized until: ${penalty.penaltyUntil}`);
+  console.log(`Abuse score: ${penalty.abuseScore}`);
+}
+```
+
+### Telemetry & Observability
+
+```typescript
+import { LoggingTelemetry, MetricsTelemetry, CompositeTelemetry } from 'halt/core/telemetry';
+
+// Logging telemetry
+const telemetry = new LoggingTelemetry(console);
+
+// Metrics telemetry (with your metrics client)
+class CustomMetrics {
+  increment(metric: string, tags?: any) { /* ... */ }
+  gauge(metric: string, value: number, tags?: any) { /* ... */ }
+}
+
+const metricsTelemetry = new MetricsTelemetry(new CustomMetrics());
+
+// Combine multiple telemetry hooks
+const compositeTelemetry = new CompositeTelemetry([
+  new LoggingTelemetry(console),
+  metricsTelemetry,
+]);
+
+// Use with limiter
+const limiter = new RateLimiter({
+  store,
+  policy,
+  telemetry: compositeTelemetry,
+});
 ```
 
 ---
@@ -282,6 +454,29 @@ const policy: Policy = {
 **Cons:**
 - ❌ Higher memory usage
 - ❌ Slightly slower
+
+### Leaky Bucket
+
+Traffic shaping with constant processing rate.
+
+```typescript
+const policy: Policy = {
+  name: 'leaky_bucket',
+  limit: 100,
+  window: 60,
+  burst: 120,
+  algorithm: Algorithm.LEAKY_BUCKET,
+};
+```
+
+**Pros:**
+- ✅ Smooth traffic shaping
+- ✅ Predictable behavior
+
+**Cons:**
+- ❌ May delay legitimate bursts
+
+**Use case:** Strict QoS requirements, traffic shaping
 
 ---
 
@@ -642,9 +837,14 @@ const policy2: Policy = { name: 'api_v2', limit: 100, window: 60 };
 
 ## Performance
 
-- **Token Bucket:** ~0.1ms per check
-- **Fixed Window:** ~0.05ms per check
-- **Sliding Window:** ~0.2ms per check
+| Algorithm | Throughput | Memory | Accuracy |
+|-----------|-----------|--------|----------|
+| Token Bucket | ~100k req/s | Low | High |
+| Fixed Window | ~120k req/s | Very Low | Medium |
+| Sliding Window | ~80k req/s | Medium | Very High |
+| Leaky Bucket | ~90k req/s | Low | High |
+
+*Benchmarks on M1 Mac, in-memory storage*
 
 All algorithms use O(1) memory per key (except Sliding Window which uses O(precision) per key).
 
@@ -682,12 +882,30 @@ Contributions welcome! Please open an issue or PR on GitHub.
 
 ## Roadmap
 
+### v0.3 (Current)
 - ✅ Token Bucket algorithm
 - ✅ Fixed Window algorithm
 - ✅ Sliding Window algorithm
+- ✅ Leaky Bucket algorithm
 - ✅ In-memory storage
+- ✅ PostgreSQL storage
+- ✅ MongoDB storage
+- ✅ DynamoDB storage
+- ✅ Memcached storage
+- ✅ Quota system
+- ✅ Penalty system
+- ✅ Telemetry hooks
+- ✅ Plan-based presets
 - ⏳ Redis storage
-- ⏳ Distributed rate limiting
-- ⏳ Tenant quotas
-- ⏳ Abuse detection
-- ⏳ Observability hooks
+
+### v0.4 (Next)
+- OpenTelemetry integration
+- Distributed global limits
+- Idempotent response mode
+- Enhanced metrics and dashboards
+
+### v1.0 (Future)
+- Adaptive limits
+- Advanced abuse detection
+- Multi-region support
+- GraphQL support
