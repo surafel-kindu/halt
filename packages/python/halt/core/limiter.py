@@ -23,9 +23,11 @@ class RateLimiter:
     def __init__(
         self,
         store: Any,
-        policy: Policy,
+        policy: "Policy | Callable[[Any], Policy]",
         trusted_proxies: Optional[list[str]] = None,
         exempt_private_ips: bool = True,
+        otel_tracer: Optional[Any] = None,
+        metrics_recorder: Optional[callable] = None,
     ) -> None:
         """Initialize rate limiter.
         
@@ -36,9 +38,11 @@ class RateLimiter:
             exempt_private_ips: Whether to exempt private IPs from rate limiting
         """
         self.store = store
-        self.policy = policy
+        self.policy_or_resolver = policy
         self.trusted_proxies = trusted_proxies or []
         self.exempt_private_ips = exempt_private_ips
+        self.otel_tracer = otel_tracer
+        self.metrics_recorder = metrics_recorder
         
         # Initialize algorithm based on policy
         if policy.algorithm == Algorithm.TOKEN_BUCKET:
@@ -85,8 +89,20 @@ class RateLimiter:
             Decision object with rate limit information
         """
         if cost is None:
-            cost = self.policy.cost
+            # resolve policy cost if needed
+            cost = None
         
+        # Resolve policy (supports static or callable resolver)
+        if callable(self.policy_or_resolver):
+            resolved_policy = self.policy_or_resolver(request)
+        else:
+            resolved_policy = self.policy_or_resolver
+
+        self.policy = resolved_policy
+
+        if cost is None:
+            cost = self.policy.cost
+
         # Check exemptions
         if self._is_exempt(request):
             return Decision(

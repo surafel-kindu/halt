@@ -14,7 +14,7 @@ export function haltMiddleware(options: RateLimiterOptions) {
     const limiter = new RateLimiter(options);
 
     return async (request: NextRequest) => {
-        const decision = limiter.check(request);
+        const decision = await limiter.check(request);
 
         if (decision.allowed) {
             // Allow request with rate limit headers
@@ -53,7 +53,7 @@ export function withHalt<T extends (...args: any[]) => Promise<Response>>(
 
     return (async (...args: any[]) => {
         const request = args[0] as NextRequest;
-        const decision = limiter.check(request);
+        const decision = await limiter.check(request);
 
         if (decision.allowed) {
             // Call the original handler

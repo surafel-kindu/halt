@@ -16,21 +16,46 @@ export interface ExpressHaltOptions {
  */
 export function haltMiddleware(options: ExpressHaltOptions) {
     return (req: Request, res: Response, next: NextFunction) => {
-        const decision = options.limiter.check(req);
-
-        if (decision.allowed) {
-            // Add rate limit headers
-            const headers = toHeaders(decision);
-            for (const [key, value] of Object.entries(headers)) {
-                res.setHeader(key, value);
-            }
-            next();
-        } else {
-            // Request blocked
-            if (options.onBlocked) {
-                options.onBlocked(req, res);
+        Promise.resolve(options.limiter.check(req)).then((decision) => {
+            if (decision.allowed) {
+                const headers = toHeaders(decision);
+                for (const [key, value] of Object.entries(headers)) {
+                    res.setHeader(key, value);
+                }
+                next();
             } else {
-                // Default 429 response
+                if (options.onBlocked) {
+                    options.onBlocked(req, res);
+                } else {
+                    const headers = toHeaders(decision);
+                    for (const [key, value] of Object.entries(headers)) {
+                        res.setHeader(key, value);
+                    }
+
+                    res.status(429).json({
+                        error: 'rate_limit_exceeded',
+                        message: 'Too many requests. Please try again later.',
+                        retryAfter: decision.retryAfter,
+                    });
+                }
+            }
+        }).catch(next);
+    };
+}
+
+/**
+ * Create a route-specific rate limiter middleware.
+ */
+export function createLimiter(limiter: RateLimiter) {
+    return (req: Request, res: Response, next: NextFunction) => {
+        Promise.resolve(limiter.check(req)).then((decision) => {
+            if (decision.allowed) {
+                const headers = toHeaders(decision);
+                for (const [key, value] of Object.entries(headers)) {
+                    res.setHeader(key, value);
+                }
+                next();
+            } else {
                 const headers = toHeaders(decision);
                 for (const [key, value] of Object.entries(headers)) {
                     res.setHeader(key, value);
@@ -42,36 +67,6 @@ export function haltMiddleware(options: ExpressHaltOptions) {
                     retryAfter: decision.retryAfter,
                 });
             }
-        }
-    };
-}
-
-/**
- * Create a route-specific rate limiter middleware.
- */
-export function createLimiter(limiter: RateLimiter) {
-    return (req: Request, res: Response, next: NextFunction) => {
-        const decision = limiter.check(req);
-
-        if (decision.allowed) {
-            // Add rate limit headers
-            const headers = toHeaders(decision);
-            for (const [key, value] of Object.entries(headers)) {
-                res.setHeader(key, value);
-            }
-            next();
-        } else {
-            // Request blocked
-            const headers = toHeaders(decision);
-            for (const [key, value] of Object.entries(headers)) {
-                res.setHeader(key, value);
-            }
-
-            res.status(429).json({
-                error: 'rate_limit_exceeded',
-                message: 'Too many requests. Please try again later.',
-                retryAfter: decision.retryAfter,
-            });
-        }
+        }).catch(next);
     };
 }

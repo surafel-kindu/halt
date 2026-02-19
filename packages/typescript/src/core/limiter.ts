@@ -15,93 +15,116 @@ import {
 import { TokenBucket, TokenBucketState } from '../algorithms/token-bucket';
 import { FixedWindow, FixedWindowState } from '../algorithms/fixed-window';
 import { SlidingWindow, SlidingWindowState } from '../algorithms/sliding-window';
+import { LeakyBucket } from '../algorithms/leaky-bucket';
 import { Store } from '../stores/memory';
 
-type AlgorithmInstance = TokenBucket | FixedWindow | SlidingWindow;
+type AlgorithmInstance = TokenBucket | FixedWindow | SlidingWindow | LeakyBucket;
 
 export interface RateLimiterOptions {
     store: Store;
-    policy: Policy;
+    /** Either a static policy or a resolver returning a policy per-request */
+    policy: Policy | ((request: any) => Policy | Promise<Policy>);
     trustedProxies?: string[];
     exemptPrivateIps?: boolean;
+    /** Optional OpenTelemetry-like tracer (object with startSpan) */
+    otelTracer?: any;
+    /** Optional metrics recorder: (name, tags?, value?) => void */
+    metricsRecorder?: (name: string, tags?: Record<string, string>, value?: number) => void;
 }
 
 export class RateLimiter {
     private store: Store;
-    private policy: Required<Policy>;
+    private policyOrResolver: Policy | ((request: any) => Policy | Promise<Policy>);
     private trustedProxies: string[];
     private exemptPrivateIps: boolean;
-    private algorithm: AlgorithmInstance;
+    private algorithmCache: Map<string, AlgorithmInstance>;
+    private otelTracer?: any;
+    private metricsRecorder?: (name: string, tags?: Record<string, string>, value?: number) => void;
 
     constructor(options: RateLimiterOptions) {
         this.store = options.store;
-        this.policy = normalizePolicy(options.policy);
+        this.policyOrResolver = options.policy;
         this.trustedProxies = options.trustedProxies ?? [];
         this.exemptPrivateIps = options.exemptPrivateIps ?? true;
-
-        // Initialize algorithm based on policy
-        if (this.policy.algorithm === Algorithm.TOKEN_BUCKET) {
-            this.algorithm = new TokenBucket(
-                this.policy.burst,
-                this.policy.limit,
-                this.policy.window
-            );
-        } else if (this.policy.algorithm === Algorithm.FIXED_WINDOW) {
-            this.algorithm = new FixedWindow(this.policy.limit, this.policy.window);
-        } else if (this.policy.algorithm === Algorithm.SLIDING_WINDOW) {
-            this.algorithm = new SlidingWindow(this.policy.limit, this.policy.window);
-        } else if (this.policy.algorithm === Algorithm.LEAKY_BUCKET) {
-            // Leaky bucket: leak_rate = limit / window (requests per second)
-            const leakRate = this.policy.limit / this.policy.window;
-            this.algorithm = new LeakyBucket(this.policy.burst, leakRate, this.policy.window);
-        } else {
-            throw new Error(`Algorithm ${this.policy.algorithm} not implemented`);
-        }
+        this.algorithmCache = new Map();
+        this.otelTracer = options.otelTracer;
+        this.metricsRecorder = options.metricsRecorder;
     }
 
     /**
      * Check if request is allowed under rate limit.
      */
-    check(request: any, cost?: number, algorithm?: Algorithm): Decision {
-        const requestCost = cost ?? this.policy.cost;
+    /**
+     * Check if request is allowed under rate limit.
+     * This method is async because policy resolution may be async (e.g. DB lookup).
+     */
+    async check(request: any, cost?: number): Promise<Decision> {
+        // Resolve policy (static or per-request)
+        const resolved =
+            typeof this.policyOrResolver === 'function'
+                ? await (this.policyOrResolver as (r: any) => Policy | Promise<Policy>)(request)
+                : (this.policyOrResolver as Policy);
 
-        // Check exemptions
-        if (this.isExempt(request)) {
-            return {
+        const policy = normalizePolicy(resolved);
+        const requestCost = cost ?? policy.cost;
+
+        // Quick exemptions check (policy-aware)
+        if (this.isExempt(request, policy)) {
+            const resp: Decision = {
                 allowed: true,
-                limit: this.policy.limit,
-                remaining: this.policy.limit,
-                resetAt: Math.floor(Date.now() / 1000 + this.policy.window),
+                limit: policy.limit,
+                remaining: policy.limit,
+                resetAt: Math.floor(Date.now() / 1000 + policy.window),
             };
+            this.metricsRecorder?.('halt.request.exempt', { policy: policy.name }, 1);
+            return resp;
         }
 
-        // Extract rate limit key
-        const key = this.extractKey(request);
+        // Extract key
+        const key = this.extractKey(request, policy);
         if (!key) {
-            // If we can't extract a key, allow the request
-            return {
+            const resp: Decision = {
                 allowed: true,
-                limit: this.policy.limit,
-                remaining: this.policy.limit,
-                resetAt: Math.floor(Date.now() / 1000 + this.policy.window),
+                limit: policy.limit,
+                remaining: policy.limit,
+                resetAt: Math.floor(Date.now() / 1000 + policy.window),
             };
+            this.metricsRecorder?.('halt.request.no_key', { policy: policy.name }, 1);
+            return resp;
         }
 
-        // Add policy name prefix to key
-        const storageKey = `halt:${this.policy.name}:${key}`;
+        const storageKey = `halt:${policy.name}:${key}`;
 
-        // Get current state from storage
+        // Get or create algorithm instance for this policy
+        let algorithm = this.algorithmCache.get(policy.name);
+        if (!algorithm) {
+            if (policy.algorithm === Algorithm.TOKEN_BUCKET) {
+                algorithm = new TokenBucket(policy.burst, policy.limit, policy.window);
+            } else if (policy.algorithm === Algorithm.FIXED_WINDOW) {
+                algorithm = new FixedWindow(policy.limit, policy.window);
+            } else if (policy.algorithm === Algorithm.SLIDING_WINDOW) {
+                algorithm = new SlidingWindow(policy.limit, policy.window);
+            } else if (policy.algorithm === Algorithm.LEAKY_BUCKET) {
+                const leakRate = policy.limit / policy.window;
+                algorithm = new LeakyBucket(policy.burst, leakRate, policy.window);
+            } else {
+                throw new Error(`Algorithm ${policy.algorithm} not implemented`);
+            }
+            this.algorithmCache.set(policy.name, algorithm);
+        }
+
+        // Instrumentation: start a span if tracer available
+        const span = this.otelTracer?.startSpan?.('halt.check', { attributes: { policy: policy.name, key } });
+
         const state = this.store.get(storageKey);
-
         let decision: Decision;
 
-        // Handle different algorithms
-        if (this.algorithm instanceof TokenBucket) {
+        if (algorithm instanceof TokenBucket) {
             let tokens: number;
             let lastRefill: number;
 
             if (!state) {
-                const initialState = this.algorithm.initialState();
+                const initialState = algorithm.initialState();
                 tokens = initialState.tokens;
                 lastRefill = initialState.lastRefill;
             } else {
@@ -109,17 +132,17 @@ export class RateLimiter {
                 lastRefill = state.lastRefill;
             }
 
-            const result = this.algorithm.checkAndConsume(tokens, lastRefill, requestCost);
+            const result = algorithm.checkAndConsume(tokens, lastRefill, requestCost);
             decision = result.decision;
 
-            const ttl = this.policy.window * 2;
+            const ttl = policy.window * 2;
             this.store.set(storageKey, { tokens: result.newTokens, lastRefill: result.newLastRefill }, ttl);
-        } else if (this.algorithm instanceof FixedWindow) {
+        } else if (algorithm instanceof FixedWindow) {
             let count: number;
             let windowStart: number;
 
             if (!state) {
-                const initialState = this.algorithm.initialState();
+                const initialState = algorithm.initialState();
                 count = initialState.count;
                 windowStart = initialState.windowStart;
             } else {
@@ -127,24 +150,24 @@ export class RateLimiter {
                 windowStart = state.windowStart;
             }
 
-            const result = this.algorithm.checkAndConsume(count, windowStart, requestCost);
+            const result = algorithm.checkAndConsume(count, windowStart, requestCost);
             decision = result.decision;
 
-            const ttl = this.policy.window * 2;
+            const ttl = policy.window * 2;
             this.store.set(storageKey, { count: result.newCount, windowStart: result.newWindowStart }, ttl);
-        } else if (this.algorithm instanceof SlidingWindow) {
-            const buckets = state || this.algorithm.initialState();
-            const result = this.algorithm.checkAndConsume(buckets, requestCost);
+        } else if (algorithm instanceof SlidingWindow) {
+            const buckets = state || algorithm.initialState();
+            const result = algorithm.checkAndConsume(buckets, requestCost);
             decision = result.decision;
 
-            const ttl = this.policy.window * 2;
+            const ttl = policy.window * 2;
             this.store.set(storageKey, result.newBuckets, ttl);
-        } else if (this.algorithm instanceof LeakyBucket) {
+        } else if (algorithm instanceof LeakyBucket) {
             let level: number;
             let lastLeak: number;
 
             if (!state) {
-                const initialState = this.algorithm.initialState();
+                const initialState = algorithm.initialState();
                 level = initialState.level;
                 lastLeak = initialState.lastLeak;
             } else {
@@ -152,14 +175,24 @@ export class RateLimiter {
                 lastLeak = state.lastLeak;
             }
 
-            const result = this.algorithm.checkAndConsume(level, lastLeak, requestCost);
+            const result = algorithm.checkAndConsume(level, lastLeak, requestCost);
             decision = result.decision;
 
-            const ttl = this.policy.window * 2;
+            const ttl = policy.window * 2;
             this.store.set(storageKey, { level: result.newLevel, lastLeak: result.newLastLeak }, ttl);
         } else {
-            throw new Error(`Algorithm ${typeof this.algorithm} not supported`);
+            throw new Error(`Algorithm ${typeof algorithm} not supported`);
         }
+
+        // Metrics and telemetry
+        this.metricsRecorder?.('halt.request.checked', { policy: policy.name, allowed: String(decision.allowed) }, 1);
+        if (decision.allowed) {
+            this.metricsRecorder?.('halt.request.allowed', { policy: policy.name }, 1);
+        } else {
+            this.metricsRecorder?.('halt.request.blocked', { policy: policy.name }, 1);
+        }
+
+        span?.end?.();
 
         return decision;
     }
