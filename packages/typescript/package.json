@@ -42,6 +42,10 @@
   ],
   "author": "Halt Contributors",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/surafel-kindu/halt"
+  },
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^20.10.0",

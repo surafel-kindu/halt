@@ -41,8 +41,8 @@ dev = [
 ]
 
 [project.urls]
-Documentation = "https://github.com/halt/halt#readme"
-Repository = "https://github.com/halt/halt"
+Documentation = "https://github.com/surafel-kindu/halt#readme"
+Repository = "https://github.com/surafel-kindu/halt"
 
 [tool.hatch.build.targets.wheel]
 packages = ["halt"]
