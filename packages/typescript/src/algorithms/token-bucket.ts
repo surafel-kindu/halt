@@ -47,7 +47,7 @@ export class TokenBucket {
             return {
                 decision: {
                     allowed: true,
-                    limit: Math.floor(this.capacity),
+                    limit: Math.floor(this.rate * this.window),
                     remaining,
                     resetAt,
                 },
@@ -62,7 +62,7 @@ export class TokenBucket {
             return {
                 decision: {
                     allowed: false,
-                    limit: Math.floor(this.capacity),
+                    limit: Math.floor(this.rate * this.window),
                     remaining: 0,
                     resetAt,
                     retryAfter,
