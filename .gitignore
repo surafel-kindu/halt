@@ -1,0 +1,6 @@
+# add node modules from the typescript package
+packages/typescript/node_modules
+
+# ignore Yarn/NPM lockfiles generated in packages
+packages/typescript/package-lock.json
+packages/typescript/yarn.lock

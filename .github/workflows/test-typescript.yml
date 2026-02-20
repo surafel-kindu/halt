@@ -28,11 +28,11 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'npm'
-          cache-dependency-path: packages/typescript/package-lock.json
+          cache-dependency-path: packages/typescript/package.json
       
       - name: Install dependencies
         working-directory: packages/typescript
-        run: npm ci
+        run: npm install
       
       - name: Lint
         working-directory: packages/typescript

@@ -56,7 +56,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add packages/python/pyproject.toml packages/typescript/package.json packages/typescript/package-lock.json
+          git add packages/python/pyproject.toml packages/typescript/package.json
           git commit -m "chore: bump version to ${{ github.event.inputs.version }}"
           git push
       
