@@ -12,9 +12,9 @@ import {
     isHealthCheck,
     isPrivateIp,
 } from './extractors';
-import { TokenBucket, TokenBucketState } from '../algorithms/token-bucket';
-import { FixedWindow, FixedWindowState } from '../algorithms/fixed-window';
-import { SlidingWindow, SlidingWindowState } from '../algorithms/sliding-window';
+import { TokenBucket } from '../algorithms/token-bucket';
+import { FixedWindow } from '../algorithms/fixed-window';
+import { SlidingWindow } from '../algorithms/sliding-window';
 import { LeakyBucket } from '../algorithms/leaky-bucket';
 import { Store } from '../stores/memory';
 
@@ -200,26 +200,26 @@ export class RateLimiter {
     /**
      * Extract rate limit key from request based on policy strategy.
      */
-    private extractKey(request: any): string | null {
+    private extractKey(request: any, policy: Policy): string | null {
         // Use custom extractor if provided
-        if (this.policy.keyExtractor) {
-            return this.policy.keyExtractor(request);
+        if (policy.keyExtractor) {
+            return policy.keyExtractor(request);
         }
 
         // Use built-in strategies
-        if (this.policy.keyStrategy === KeyStrategy.IP) {
+        if (policy.keyStrategy === KeyStrategy.IP) {
             return extractIp(request, this.trustedProxies);
         }
 
-        if (this.policy.keyStrategy === KeyStrategy.USER) {
+        if (policy.keyStrategy === KeyStrategy.USER) {
             return extractUserId(request);
         }
 
-        if (this.policy.keyStrategy === KeyStrategy.API_KEY) {
+        if (policy.keyStrategy === KeyStrategy.API_KEY) {
             return extractApiKey(request);
         }
 
-        if (this.policy.keyStrategy === KeyStrategy.COMPOSITE) {
+        if (policy.keyStrategy === KeyStrategy.COMPOSITE) {
             // Composite: user:ip or api_key:ip
             const user = extractUserId(request);
             const apiKey = extractApiKey(request);
@@ -244,7 +244,7 @@ export class RateLimiter {
     /**
      * Check if request is exempt from rate limiting.
      */
-    private isExempt(request: any): boolean {
+    private isExempt(request: any, policy: Policy): boolean {
         // Check health check paths
         const path = extractPath(request);
         if (path && isHealthCheck(path)) {
@@ -252,7 +252,7 @@ export class RateLimiter {
         }
 
         // Check custom exemptions
-        if (path && this.policy.exemptions.includes(path)) {
+        if (path && policy.exemptions.includes(path)) {
             return true;
         }
 
@@ -266,7 +266,7 @@ export class RateLimiter {
 
         // Check IP exemptions
         const ip = extractIp(request, this.trustedProxies);
-        if (ip && this.policy.exemptions.includes(ip)) {
+        if (ip && policy.exemptions.includes(ip)) {
             return true;
         }
 
