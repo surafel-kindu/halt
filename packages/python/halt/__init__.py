@@ -3,7 +3,7 @@
 __version__ = "0.1.0"
 
 from halt.core.limiter import RateLimiter
-from halt.core.policy import Policy, KeyStrategy
+from halt.core.policy import Policy, KeyStrategy, Algorithm
 from halt.core.decision import Decision
 from halt.stores.memory import InMemoryStore
 from halt import presets
@@ -12,6 +12,7 @@ __all__ = [
     "RateLimiter",
     "Policy",
     "KeyStrategy",
+    "Algorithm",
     "Decision",
     "InMemoryStore",
     "presets",
