@@ -11,5 +11,12 @@ export {
     normalizePolicy,
 } from './core/policy';
 export { InMemoryStore, type Store } from './stores/memory';
+export { RedisStore, type RedisStoreOptions, type FailMode } from './stores/redis';
+export {
+    type AtomicStore,
+    type EvaluateInput,
+    type RedisClientLike,
+    isAtomicStore,
+} from './core/store';
 export * as presets from './presets';
 export * as extractors from './core/extractors';

@@ -1,6 +1,6 @@
 """Halt - Rate limiting middleware with safe defaults and Redis-backed accuracy."""
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 from halt.core.limiter import RateLimiter
 from halt.core.policy import Policy, KeyStrategy, Algorithm
@@ -19,7 +19,8 @@ __all__ = [
 ]
 
 try:
-    from halt.stores.redis import RedisStore
+    from halt.stores.redis import RedisStore, AsyncRedisStore
     __all__.append("RedisStore")
+    __all__.append("AsyncRedisStore")
 except ImportError:
     pass

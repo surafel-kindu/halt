@@ -15,7 +15,7 @@
 
 💾 **Multiple Storage Backends**
 - In-Memory (development, single-threaded)
-- Redis (production, distributed) - Coming soon
+- Redis (production, distributed, **atomic via Lua**, cluster-safe) ✅
 - PostgreSQL (ACID, relational)
 - MongoDB (document store, TTL indexes)
 - DynamoDB (AWS serverless, auto-scaling)
@@ -55,6 +55,9 @@ pnpm add halt
 ### Optional Dependencies
 
 ```bash
+# Redis support (recommended for production)
+npm install ioredis
+
 # PostgreSQL support
 npm install pg
 
@@ -79,6 +82,41 @@ import { InMemoryStore } from 'halt';
 
 const store = new InMemoryStore();
 ```
+
+### Redis (Production, recommended)
+
+The Redis store runs the full check-and-consume **inside Redis via a Lua script**,
+so limits stay accurate under concurrent load from any number of app servers. You
+inject your own client (ioredis or node-redis v4+), so Halt has no hard dependency
+on a particular Redis library.
+
+```typescript
+import Redis from 'ioredis';
+import { RateLimiter, RedisStore, presets } from 'halt';
+
+const store = new RedisStore({
+  client: new Redis(process.env.REDIS_URL),
+  // What to do if Redis is unreachable:
+  //   'open'   (default) — allow the request (don't take down traffic)
+  //   'closed'           — block the request (429)
+  failMode: 'open',
+  onError: (err) => console.error('redis rate-limit error', err),
+});
+
+const limiter = new RateLimiter({ store, policy: presets.PUBLIC_API });
+```
+
+**Atomicity.** All four algorithms are implemented as single-key Lua scripts, so a
+burst of concurrent requests can never over-admit past the limit. The script reads
+the clock from the Redis server (`TIME`), so app-server clock skew doesn't matter.
+
+**Redis Cluster.** Every script touches exactly one key, so it is cluster-safe out
+of the box. To colocate related keys on the same slot, wrap the variable part of
+your key in a hash tag, e.g. `halt:{user-123}:...`.
+
+> JavaScript has no synchronous network I/O, so the TypeScript store is async-only
+> (the limiter's `check()` is already async). A synchronous client is available in
+> the Python package.
 
 ### PostgreSQL
 

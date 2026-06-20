@@ -37,9 +37,9 @@ class HaltMiddleware(BaseHTTPMiddleware):
         Returns:
             Response
         """
-        # Check rate limit
-        decision = self.limiter.check(request)
-        
+        # Check rate limit (async path supports async Redis stores)
+        decision = await self.limiter.acheck(request)
+
         # Add rate limit headers to response
         if decision.allowed:
             response = await call_next(request)
@@ -97,5 +97,43 @@ def create_limiter_dependency(limiter: RateLimiter) -> Callable:
                 },
                 headers=headers,
             )
-    
+
+    return dependency
+
+
+def create_async_limiter_dependency(limiter: RateLimiter) -> Callable:
+    """Create an async FastAPI dependency (use with an async Redis store).
+
+    Args:
+        limiter: RateLimiter instance backed by an ``AsyncRedisStore``.
+
+    Returns:
+        An async dependency function.
+
+    Example:
+        ```python
+        from fastapi import Depends
+
+        rate_limit = create_async_limiter_dependency(limiter)
+
+        @app.get("/api/data", dependencies=[Depends(rate_limit)])
+        async def get_data():
+            return {"data": "..."}
+        ```
+    """
+
+    async def dependency(request: Request) -> None:
+        decision = await limiter.acheck(request)
+        if not decision.allowed:
+            headers = decision.to_headers()
+            raise HTTPException(
+                status_code=429,
+                detail={
+                    "error": "rate_limit_exceeded",
+                    "message": "Too many requests. Please try again later.",
+                    "retry_after": decision.retry_after,
+                },
+                headers=headers,
+            )
+
     return dependency

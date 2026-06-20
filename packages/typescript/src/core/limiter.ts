@@ -17,11 +17,17 @@ import { FixedWindow } from '../algorithms/fixed-window';
 import { SlidingWindow } from '../algorithms/sliding-window';
 import { LeakyBucket } from '../algorithms/leaky-bucket';
 import { Store } from '../stores/memory';
+import { AtomicStore, isAtomicStore } from './store';
 
 type AlgorithmInstance = TokenBucket | FixedWindow | SlidingWindow | LeakyBucket;
 
 export interface RateLimiterOptions {
-    store: Store;
+    /**
+     * Storage backend. Either a simple KV store (InMemoryStore — the limiter runs
+     * the algorithm in-process) or an atomic store (RedisStore — the store
+     * computes the decision atomically via Lua).
+     */
+    store: Store | AtomicStore;
     /** Either a static policy or a resolver returning a policy per-request */
     policy: Policy | ((request: any) => Policy | Promise<Policy>);
     trustedProxies?: string[];
@@ -33,7 +39,7 @@ export interface RateLimiterOptions {
 }
 
 export class RateLimiter {
-    private store: Store;
+    private store: Store | AtomicStore;
     private policyOrResolver: Policy | ((request: any) => Policy | Promise<Policy>);
     private trustedProxies: string[];
     private exemptPrivateIps: boolean;
@@ -95,6 +101,36 @@ export class RateLimiter {
 
         const storageKey = `halt:${policy.name}:${key}`;
 
+        // Atomic stores (e.g. Redis) compute the whole decision themselves.
+        if (isAtomicStore(this.store)) {
+            const span = this.otelTracer?.startSpan?.('halt.check', {
+                attributes: { policy: policy.name, key },
+            });
+            const decision = await this.store.evaluate({
+                key: storageKey,
+                algorithm: policy.algorithm,
+                limit: policy.limit,
+                window: policy.window,
+                burst: policy.burst,
+                cost: requestCost,
+                ttl: policy.window * 2,
+            });
+            this.metricsRecorder?.(
+                'halt.request.checked',
+                { policy: policy.name, allowed: String(decision.allowed) },
+                1
+            );
+            this.metricsRecorder?.(
+                decision.allowed ? 'halt.request.allowed' : 'halt.request.blocked',
+                { policy: policy.name },
+                1
+            );
+            span?.end?.();
+            return decision;
+        }
+
+        const store = this.store as Store;
+
         // Get or create algorithm instance for this policy
         let algorithm = this.algorithmCache.get(policy.name);
         if (!algorithm) {
@@ -116,7 +152,7 @@ export class RateLimiter {
         // Instrumentation: start a span if tracer available
         const span = this.otelTracer?.startSpan?.('halt.check', { attributes: { policy: policy.name, key } });
 
-        const state = this.store.get(storageKey);
+        const state = store.get(storageKey);
         let decision: Decision;
 
         if (algorithm instanceof TokenBucket) {
@@ -136,7 +172,7 @@ export class RateLimiter {
             decision = result.decision;
 
             const ttl = policy.window * 2;
-            this.store.set(storageKey, { tokens: result.newTokens, lastRefill: result.newLastRefill }, ttl);
+            store.set(storageKey, { tokens: result.newTokens, lastRefill: result.newLastRefill }, ttl);
         } else if (algorithm instanceof FixedWindow) {
             let count: number;
             let windowStart: number;
@@ -154,14 +190,14 @@ export class RateLimiter {
             decision = result.decision;
 
             const ttl = policy.window * 2;
-            this.store.set(storageKey, { count: result.newCount, windowStart: result.newWindowStart }, ttl);
+            store.set(storageKey, { count: result.newCount, windowStart: result.newWindowStart }, ttl);
         } else if (algorithm instanceof SlidingWindow) {
             const buckets = state || algorithm.initialState();
             const result = algorithm.checkAndConsume(buckets, requestCost);
             decision = result.decision;
 
             const ttl = policy.window * 2;
-            this.store.set(storageKey, result.newBuckets, ttl);
+            store.set(storageKey, result.newBuckets, ttl);
         } else if (algorithm instanceof LeakyBucket) {
             let level: number;
             let lastLeak: number;
@@ -179,7 +215,7 @@ export class RateLimiter {
             decision = result.decision;
 
             const ttl = policy.window * 2;
-            this.store.set(storageKey, { level: result.newLevel, lastLeak: result.newLastLeak }, ttl);
+            store.set(storageKey, { level: result.newLevel, lastLeak: result.newLastLeak }, ttl);
         } else {
             throw new Error(`Algorithm ${typeof algorithm} not supported`);
         }

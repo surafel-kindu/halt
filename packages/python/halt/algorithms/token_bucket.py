@@ -65,7 +65,7 @@ class TokenBucket:
             return (
                 Decision(
                     allowed=True,
-                    limit=int(self.capacity),
+                    limit=int(self.rate * self.window),
                     remaining=remaining,
                     reset_at=reset_at,
                 ),
@@ -80,7 +80,7 @@ class TokenBucket:
             return (
                 Decision(
                     allowed=False,
-                    limit=int(self.capacity),
+                    limit=int(self.rate * self.window),
                     remaining=0,
                     reset_at=reset_at,
                     retry_after=retry_after,

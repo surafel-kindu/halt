@@ -21,7 +21,7 @@
 
 💾 **Storage Options**
 - In-memory (development)
-- Redis (production, coming soon)
+- Redis (production, **atomic via Lua**, cluster-safe, sync **and** async) ✅
 
 🎯 **Framework Support**
 - FastAPI / Starlette
@@ -52,7 +52,7 @@ pip install halt
 ### Optional Dependencies
 
 ```bash
-# Redis support (coming soon)
+# Redis support (recommended for production)
 pip install halt[redis]
 
 # Framework-specific
@@ -131,6 +131,55 @@ MIDDLEWARE = [
     'myapp.middleware.HaltMiddleware',
 ]
 ```
+
+---
+
+## Redis (Production)
+
+The Redis store runs the full check-and-consume **inside Redis via a Lua script**,
+so limits stay accurate under concurrent load from any number of workers or
+processes. You inject your own client, so Halt has no hard dependency on a
+particular Redis setup. Both a synchronous and an asynchronous store are provided.
+
+```python
+import redis
+from halt import RateLimiter, RedisStore, presets
+
+store = RedisStore(
+    client=redis.Redis.from_url("redis://localhost:6379"),
+    # What to do if Redis is unreachable:
+    #   "open"   (default) — allow the request (don't take down traffic)
+    #   "closed"           — block the request (429)
+    fail_mode="open",
+    on_error=lambda err: print("redis rate-limit error", err),
+)
+
+limiter = RateLimiter(store=store, policy=presets.PUBLIC_API)
+decision = limiter.check(request)
+```
+
+### Async (FastAPI / asyncio)
+
+Use `AsyncRedisStore` with `redis.asyncio` and call `await limiter.acheck(request)`.
+The FastAPI middleware already calls `acheck`, so an async store works end-to-end.
+
+```python
+import redis.asyncio as aioredis
+from halt import RateLimiter, AsyncRedisStore, presets
+
+store = AsyncRedisStore(client=aioredis.Redis.from_url("redis://localhost:6379"))
+limiter = RateLimiter(store=store, policy=presets.PUBLIC_API)
+
+decision = await limiter.acheck(request)
+```
+
+**Atomicity.** All four algorithms are single-key Lua scripts, so a burst of
+concurrent requests can never over-admit past the limit. The script reads the clock
+from the Redis server (`TIME`), so client clock skew doesn't matter.
+
+**Redis Cluster.** Every script touches exactly one key, so it is cluster-safe out
+of the box. To colocate related keys on the same slot, wrap the variable part of
+your key in a hash tag, e.g. `halt:{user-123}:...`.
 
 ---
 

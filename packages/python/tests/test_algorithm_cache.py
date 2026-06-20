@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 from halt.core.limiter import RateLimiter
 from halt.stores.memory import InMemoryStore
 from halt.presets import PLAN_FREE

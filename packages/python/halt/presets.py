@@ -54,3 +54,77 @@ GENEROUS_API = Policy(
     algorithm=Algorithm.TOKEN_BUCKET,
     key_strategy=KeyStrategy.IP,
 )
+
+# Plan-based presets for SaaS platforms
+PLAN_FREE = Policy(
+    name="free_plan",
+    limit=100,
+    window=3600,  # 100 requests per hour
+    burst=120,
+    algorithm=Algorithm.TOKEN_BUCKET,
+    key_strategy=KeyStrategy.USER,
+)
+
+PLAN_STARTER = Policy(
+    name="starter_plan",
+    limit=500,
+    window=3600,  # 500 requests per hour
+    burst=600,
+    algorithm=Algorithm.TOKEN_BUCKET,
+    key_strategy=KeyStrategy.USER,
+)
+
+PLAN_PRO = Policy(
+    name="pro_plan",
+    limit=2000,
+    window=3600,  # 2000 requests per hour
+    burst=2500,
+    algorithm=Algorithm.TOKEN_BUCKET,
+    key_strategy=KeyStrategy.USER,
+)
+
+PLAN_BUSINESS = Policy(
+    name="business_plan",
+    limit=5000,
+    window=3600,  # 5000 requests per hour
+    burst=6000,
+    algorithm=Algorithm.TOKEN_BUCKET,
+    key_strategy=KeyStrategy.USER,
+)
+
+PLAN_ENTERPRISE = Policy(
+    name="enterprise_plan",
+    limit=20000,
+    window=3600,  # 20000 requests per hour
+    burst=25000,
+    algorithm=Algorithm.TOKEN_BUCKET,
+    key_strategy=KeyStrategy.USER,
+)
+
+# Plan mapping helper
+PLAN_TIERS = {
+    "free": PLAN_FREE,
+    "starter": PLAN_STARTER,
+    "pro": PLAN_PRO,
+    "business": PLAN_BUSINESS,
+    "enterprise": PLAN_ENTERPRISE,
+}
+
+
+def get_plan_policy(plan_name: str) -> Policy:
+    """Get the policy for a plan tier.
+
+    Args:
+        plan_name: Plan tier name (free, starter, pro, business, enterprise).
+
+    Returns:
+        The Policy for the plan.
+
+    Raises:
+        ValueError: If the plan name is invalid.
+    """
+    normalized = plan_name.lower()
+    if normalized not in PLAN_TIERS:
+        valid = ", ".join(PLAN_TIERS.keys())
+        raise ValueError(f"Invalid plan: {plan_name}. Valid plans: {valid}")
+    return PLAN_TIERS[normalized]

@@ -1,7 +1,7 @@
 """Main rate limiter implementation."""
 
 import time
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Tuple, Union
 from halt.core.policy import Policy, KeyStrategy, Algorithm
 from halt.core.decision import Decision
 from halt.core.extractors import (
@@ -19,23 +19,28 @@ from halt.algorithms.leaky_bucket import LeakyBucket
 
 class RateLimiter:
     """Main rate limiter class that orchestrates policy, storage, and algorithms."""
-    
+
     def __init__(
         self,
         store: Any,
-        policy: "Policy | Callable[[Any], Policy]",
-        trusted_proxies: Optional[list[str]] = None,
+        policy: "Union[Policy, Callable[[Any], Policy]]",
+        trusted_proxies: Optional[list] = None,
         exempt_private_ips: bool = True,
         otel_tracer: Optional[Any] = None,
-        metrics_recorder: Optional[callable] = None,
+        metrics_recorder: Optional[Callable] = None,
     ) -> None:
         """Initialize rate limiter.
-        
+
         Args:
-            store: Storage backend (InMemoryStore or RedisStore)
-            policy: Rate limiting policy
-            trusted_proxies: List of trusted proxy IPs/networks for X-Forwarded-For
-            exempt_private_ips: Whether to exempt private IPs from rate limiting
+            store: Storage backend. A simple store (InMemoryStore — the limiter
+                runs the algorithm in-process) or an atomic store (RedisStore /
+                AsyncRedisStore — the store computes the decision via Lua).
+            policy: A static Policy or a resolver callable returning a Policy
+                per request (for per-user / per-plan limits).
+            trusted_proxies: Trusted proxy IPs/networks for X-Forwarded-For.
+            exempt_private_ips: Whether to exempt private IPs from rate limiting.
+            otel_tracer: Optional OpenTelemetry-like tracer (has ``start_span``).
+            metrics_recorder: Optional ``(name, tags, value)`` metrics hook.
         """
         self.store = store
         self.policy_or_resolver = policy
@@ -43,187 +48,203 @@ class RateLimiter:
         self.exempt_private_ips = exempt_private_ips
         self.otel_tracer = otel_tracer
         self.metrics_recorder = metrics_recorder
-        
-        # Initialize algorithm based on policy
+        # Algorithm instances are built lazily per resolved policy and cached
+        # (only used for the in-process path; atomic stores run Lua instead).
+        self._algorithm_cache: dict = {}
+
+    # ----- algorithm construction (in-process path) -----------------------
+
+    def _get_algorithm(self, policy: Policy) -> Any:
+        """Build (and cache) the algorithm instance for a resolved policy.
+
+        Cached by the parameters that affect behavior, so a resolver returning
+        different limits under the same policy name stays correct.
+        """
+        cache_key = (
+            policy.name,
+            policy.algorithm,
+            policy.limit,
+            policy.window,
+            policy.burst,
+        )
+        algorithm = self._algorithm_cache.get(cache_key)
+        if algorithm is not None:
+            return algorithm
+
         if policy.algorithm == Algorithm.TOKEN_BUCKET:
-            self.algorithm = TokenBucket(
+            algorithm = TokenBucket(
                 capacity=policy.burst or policy.limit,
                 rate=policy.limit,
                 window=policy.window,
             )
         elif policy.algorithm == Algorithm.FIXED_WINDOW:
-            self.algorithm = FixedWindow(
-                limit=policy.limit,
-                window=policy.window,
-            )
+            algorithm = FixedWindow(limit=policy.limit, window=policy.window)
         elif policy.algorithm == Algorithm.SLIDING_WINDOW:
-            self.algorithm = SlidingWindow(
-                limit=policy.limit,
-                window=policy.window,
-            )
+            algorithm = SlidingWindow(limit=policy.limit, window=policy.window)
         elif policy.algorithm == Algorithm.LEAKY_BUCKET:
-            # Leaky bucket: leak_rate = limit / window (requests per second)
             leak_rate = policy.limit / policy.window
-            self.algorithm = LeakyBucket(
+            algorithm = LeakyBucket(
                 capacity=policy.burst or policy.limit,
                 leak_rate=leak_rate,
                 window=policy.window,
             )
         else:
             raise NotImplementedError(f"Algorithm {policy.algorithm} not implemented")
-    
-    def check(
-        self,
-        request: Any,
-        cost: Optional[int] = None,
-        algorithm: Optional[Algorithm] = None,
-    ) -> Decision:
-        """Check if request is allowed under rate limit.
-        
-        Args:
-            request: Request object (framework-specific)
-            cost: Cost of this request (defaults to policy.cost)
-            algorithm: Override algorithm for this request (optional)
-        
-        Returns:
-            Decision object with rate limit information
+
+        self._algorithm_cache[cache_key] = algorithm
+        return algorithm
+
+    # ----- shared request preparation -------------------------------------
+
+    def _allow_all(self, policy: Policy) -> Decision:
+        return Decision(
+            allowed=True,
+            limit=policy.limit,
+            remaining=policy.limit,
+            reset_at=int(time.time() + policy.window),
+        )
+
+    def _prepare(
+        self, request: Any, cost: Optional[int]
+    ) -> Tuple[Optional[Decision], Optional[Policy], Optional[str], int]:
+        """Resolve policy, apply exemptions, and extract the storage key.
+
+        Returns ``(early_decision, policy, storage_key, cost)``. When
+        ``early_decision`` is set the caller should return it directly.
         """
-        if cost is None:
-            # resolve policy cost if needed
-            cost = None
-        
-        # Resolve policy (supports static or callable resolver)
         if callable(self.policy_or_resolver):
-            resolved_policy = self.policy_or_resolver(request)
+            policy = self.policy_or_resolver(request)
         else:
-            resolved_policy = self.policy_or_resolver
-
-        self.policy = resolved_policy
+            policy = self.policy_or_resolver
 
         if cost is None:
-            cost = self.policy.cost
+            cost = policy.cost
 
-        # Check exemptions
-        if self._is_exempt(request):
-            return Decision(
-                allowed=True,
-                limit=self.policy.limit,
-                remaining=self.policy.limit,
-                reset_at=int(time.time() + self.policy.window),
-            )
-        
-        # Extract rate limit key
-        key = self._extract_key(request)
+        if self._is_exempt(request, policy):
+            return self._allow_all(policy), policy, None, cost
+
+        key = self._extract_key(request, policy)
         if key is None:
-            # If we can't extract a key, allow the request
-            return Decision(
-                allowed=True,
-                limit=self.policy.limit,
-                remaining=self.policy.limit,
-                reset_at=int(time.time() + self.policy.window),
-            )
-        
-        # Add policy name prefix to key
-        storage_key = f"halt:{self.policy.name}:{key}"
-        
-        # Get current state from storage
+            return self._allow_all(policy), policy, None, cost
+
+        storage_key = f"halt:{policy.name}:{key}"
+        return None, policy, storage_key, cost
+
+    def _evaluate_args(self, policy: Policy, storage_key: str, cost: int) -> dict:
+        return dict(
+            key=storage_key,
+            algorithm=policy.algorithm,
+            limit=policy.limit,
+            window=policy.window,
+            burst=policy.burst or policy.limit,
+            cost=cost,
+            ttl=policy.window * 2,
+        )
+
+    # ----- public API -----------------------------------------------------
+
+    def check(self, request: Any, cost: Optional[int] = None) -> Decision:
+        """Check if a request is allowed under the rate limit (synchronous).
+
+        Delegates to an atomic store's ``evaluate`` when available, otherwise
+        runs the algorithm in-process against the simple store.
+        """
+        early, policy, storage_key, cost = self._prepare(request, cost)
+        if early is not None:
+            return early
+
+        if hasattr(self.store, "evaluate"):
+            return self.store.evaluate(**self._evaluate_args(policy, storage_key, cost))
+
+        return self._compute_in_app(policy, storage_key, cost)
+
+    async def acheck(self, request: Any, cost: Optional[int] = None) -> Decision:
+        """Async variant of :meth:`check` for async stores / frameworks.
+
+        Uses an atomic store's ``aevaluate`` when available, falls back to a
+        synchronous ``evaluate``, and finally to the in-process path.
+        """
+        early, policy, storage_key, cost = self._prepare(request, cost)
+        if early is not None:
+            return early
+
+        if hasattr(self.store, "aevaluate"):
+            return await self.store.aevaluate(**self._evaluate_args(policy, storage_key, cost))
+
+        if hasattr(self.store, "evaluate"):
+            return self.store.evaluate(**self._evaluate_args(policy, storage_key, cost))
+
+        return self._compute_in_app(policy, storage_key, cost)
+
+    # ----- in-process algorithm path --------------------------------------
+
+    def _compute_in_app(self, policy: Policy, storage_key: str, cost: int) -> Decision:
+        """Run the algorithm in-process using the simple (KV) store."""
+        algorithm = self._get_algorithm(policy)
         state = self.store.get(storage_key)
-        
-        # Handle different algorithms
-        if isinstance(self.algorithm, TokenBucket):
+        ttl = policy.window * 2
+
+        if isinstance(algorithm, TokenBucket):
             if state is None:
-                tokens, last_refill = self.algorithm.initial_state()
+                tokens, last_refill = algorithm.initial_state()
             else:
                 tokens, last_refill = state
-            
-            decision, new_tokens, new_last_refill = self.algorithm.check_and_consume(
-                current_tokens=tokens,
-                last_refill=last_refill,
-                cost=cost,
+            decision, new_tokens, new_last_refill = algorithm.check_and_consume(
+                current_tokens=tokens, last_refill=last_refill, cost=cost
             )
-            
-            # Update storage
-            ttl = self.policy.window * 2
             self.store.set(storage_key, (new_tokens, new_last_refill), ttl=ttl)
-        
-        elif isinstance(self.algorithm, FixedWindow):
+
+        elif isinstance(algorithm, FixedWindow):
             if state is None:
-                count, window_start = self.algorithm.initial_state()
+                count, window_start = algorithm.initial_state()
             else:
                 count, window_start = state
-            
-            decision, new_count, new_window_start = self.algorithm.check_and_consume(
-                current_count=count,
-                window_start=window_start,
-                cost=cost,
+            decision, new_count, new_window_start = algorithm.check_and_consume(
+                current_count=count, window_start=window_start, cost=cost
             )
-            
-            # Update storage
-            ttl = self.policy.window * 2
             self.store.set(storage_key, (new_count, new_window_start), ttl=ttl)
-        
-        elif isinstance(self.algorithm, SlidingWindow):
-            buckets = state if state is not None else self.algorithm.initial_state()
-            
-            decision, new_buckets = self.algorithm.check_and_consume(
-                buckets=buckets,
-                cost=cost,
-            )
-            
-            # Update storage
-            ttl = self.policy.window * 2
+
+        elif isinstance(algorithm, SlidingWindow):
+            buckets = state if state is not None else algorithm.initial_state()
+            decision, new_buckets = algorithm.check_and_consume(buckets=buckets, cost=cost)
             self.store.set(storage_key, new_buckets, ttl=ttl)
-        
-        elif isinstance(self.algorithm, LeakyBucket):
+
+        elif isinstance(algorithm, LeakyBucket):
             if state is None:
-                level, last_leak = self.algorithm.initial_state()
+                level, last_leak = algorithm.initial_state()
             else:
                 level, last_leak = state
-            
-            decision, new_level, new_last_leak = self.algorithm.check_and_consume(
-                current_level=level,
-                last_leak=last_leak,
-                cost=cost,
+            decision, new_level, new_last_leak = algorithm.check_and_consume(
+                current_level=level, last_leak=last_leak, cost=cost
             )
-            
-            # Update storage
-            ttl = self.policy.window * 2
             self.store.set(storage_key, (new_level, new_last_leak), ttl=ttl)
-        
+
         else:
-            raise NotImplementedError(f"Algorithm {type(self.algorithm)} not supported")
-        
+            raise NotImplementedError(f"Algorithm {type(algorithm)} not supported")
+
         return decision
-    
-    def _extract_key(self, request: Any) -> Optional[str]:
-        """Extract rate limit key from request based on policy strategy.
-        
-        Args:
-            request: Request object
-        
-        Returns:
-            Rate limit key or None
-        """
-        # Use custom extractor if provided
-        if self.policy.key_extractor:
-            return self.policy.key_extractor(request)
-        
-        # Use built-in strategies
-        if self.policy.key_strategy == KeyStrategy.IP:
+
+    # ----- key extraction & exemptions ------------------------------------
+
+    def _extract_key(self, request: Any, policy: Policy) -> Optional[str]:
+        """Extract the rate limit key from a request based on policy strategy."""
+        if policy.key_extractor:
+            return policy.key_extractor(request)
+
+        if policy.key_strategy == KeyStrategy.IP:
             return extract_ip(request, self.trusted_proxies)
-        
-        elif self.policy.key_strategy == KeyStrategy.USER:
+
+        elif policy.key_strategy == KeyStrategy.USER:
             return extract_user_id(request)
-        
-        elif self.policy.key_strategy == KeyStrategy.API_KEY:
+
+        elif policy.key_strategy == KeyStrategy.API_KEY:
             return extract_api_key(request)
-        
-        elif self.policy.key_strategy == KeyStrategy.COMPOSITE:
-            # Composite: user:ip or api_key:ip
+
+        elif policy.key_strategy == KeyStrategy.COMPOSITE:
             user = extract_user_id(request)
             api_key = extract_api_key(request)
             ip = extract_ip(request, self.trusted_proxies)
-            
+
             if user and ip:
                 return f"{user}:{ip}"
             elif api_key and ip:
@@ -234,55 +255,36 @@ class RateLimiter:
                 return api_key
             else:
                 return ip
-        
+
         return None
-    
-    def _is_exempt(self, request: Any) -> bool:
-        """Check if request is exempt from rate limiting.
-        
-        Args:
-            request: Request object
-        
-        Returns:
-            True if exempt, False otherwise
-        """
-        # Check health check paths
+
+    def _is_exempt(self, request: Any, policy: Policy) -> bool:
+        """Check if a request is exempt from rate limiting."""
         path = self._get_path(request)
         if path and is_health_check(path):
             return True
-        
-        # Check custom exemptions
-        if path and path in self.policy.exemptions:
+
+        if path and path in policy.exemptions:
             return True
-        
-        # Check private IPs
+
         if self.exempt_private_ips:
             ip = extract_ip(request, self.trusted_proxies)
             if ip and is_private_ip(ip):
                 return True
-        
-        # Check IP exemptions
+
         ip = extract_ip(request, self.trusted_proxies)
-        if ip and ip in self.policy.exemptions:
+        if ip and ip in policy.exemptions:
             return True
-        
+
         return False
-    
+
     def _get_path(self, request: Any) -> Optional[str]:
-        """Extract path from request object.
-        
-        Args:
-            request: Request object
-        
-        Returns:
-            Request path or None
-        """
-        # Try different framework patterns
+        """Extract the request path (framework-agnostic)."""
         if hasattr(request, "url") and hasattr(request.url, "path"):
             # FastAPI/Starlette
             return request.url.path
         elif hasattr(request, "path"):
             # Flask/Django
             return request.path
-        
+
         return None
