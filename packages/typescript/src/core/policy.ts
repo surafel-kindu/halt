@@ -38,6 +38,8 @@ export interface Policy {
     keyExtractor?: (request: any) => string | null;
     /** List of paths or IPs to exempt from rate limiting */
     exemptions?: string[];
+    /** Optional plan/tier label for observability tagging (e.g. "pro"). */
+    plan?: string;
 }
 
 /**
@@ -55,6 +57,7 @@ export function normalizePolicy(policy: Policy): Required<Policy> {
         blockDuration: policy.blockDuration ?? undefined,
         keyExtractor: policy.keyExtractor ?? undefined,
         exemptions: policy.exemptions ?? [],
+        plan: policy.plan ?? undefined,
     } as Required<Policy>;
 
     // Validation

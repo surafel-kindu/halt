@@ -18,6 +18,7 @@ import { SlidingWindow } from '../algorithms/sliding-window';
 import { LeakyBucket } from '../algorithms/leaky-bucket';
 import { Store } from '../stores/memory';
 import { AtomicStore, isAtomicStore } from './store';
+import { TelemetryHooks } from './telemetry';
 
 type AlgorithmInstance = TokenBucket | FixedWindow | SlidingWindow | LeakyBucket;
 
@@ -36,6 +37,12 @@ export interface RateLimiterOptions {
     otelTracer?: any;
     /** Optional metrics recorder: (name, tags?, value?) => void */
     metricsRecorder?: (name: string, tags?: Record<string, string>, value?: number) => void;
+    /**
+     * Optional high-level observability hooks (StatsCollector, OpenTelemetryMetrics,
+     * LoggingTelemetry, or a CompositeTelemetry of several). Called on every
+     * rate-limited check with rich metadata (policy, algorithm, endpoint, cost, plan).
+     */
+    telemetry?: TelemetryHooks;
 }
 
 export class RateLimiter {
@@ -46,6 +53,7 @@ export class RateLimiter {
     private algorithmCache: Map<string, AlgorithmInstance>;
     private otelTracer?: any;
     private metricsRecorder?: (name: string, tags?: Record<string, string>, value?: number) => void;
+    private telemetry?: TelemetryHooks;
 
     constructor(options: RateLimiterOptions) {
         this.store = options.store;
@@ -55,6 +63,32 @@ export class RateLimiter {
         this.algorithmCache = new Map();
         this.otelTracer = options.otelTracer;
         this.metricsRecorder = options.metricsRecorder;
+        this.telemetry = options.telemetry;
+    }
+
+    /** Fan a finished decision out to the telemetry hooks with rich metadata. */
+    private emitTelemetry(
+        request: any,
+        key: string,
+        decision: Decision,
+        policy: Required<Policy>,
+        cost: number
+    ): void {
+        if (!this.telemetry) return;
+        const metadata: Record<string, any> = {
+            policy: policy.name,
+            algorithm: policy.algorithm,
+            keyStrategy: policy.keyStrategy,
+            endpoint: extractPath(request) ?? undefined,
+            cost,
+            plan: policy.plan,
+        };
+        this.telemetry.onCheck?.(key, decision, metadata);
+        if (decision.allowed) {
+            this.telemetry.onAllowed?.(key, decision, metadata);
+        } else {
+            this.telemetry.onBlocked?.(key, decision, metadata);
+        }
     }
 
     /**
@@ -126,6 +160,7 @@ export class RateLimiter {
                 1
             );
             span?.end?.();
+            this.emitTelemetry(request, key, decision, policy, requestCost);
             return decision;
         }
 
@@ -229,6 +264,8 @@ export class RateLimiter {
         }
 
         span?.end?.();
+
+        this.emitTelemetry(request, key, decision, policy, requestCost);
 
         return decision;
     }

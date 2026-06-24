@@ -51,7 +51,8 @@ class Policy:
     block_duration: Optional[int] = None
     key_extractor: Optional[Callable[[Any], Optional[str]]] = None
     exemptions: list[str] = field(default_factory=list)
-    
+    plan: Optional[str] = None
+
     def __post_init__(self) -> None:
         """Validate and set defaults."""
         if self.burst is None:

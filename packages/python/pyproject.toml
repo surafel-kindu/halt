@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "halt-rate"
-version = "0.2.0"
-description = "Drop-in middleware that enforces consistent rate limits with safe defaults and Redis-backed accuracy"
+version = "0.3.0"
+description = "SaaS-aware, cross-language rate limiting: per-user/API-key/plan limits, quotas, weighted endpoints, abuse controls, atomic Redis, and built-in observability"
 readme = "README.md"
 requires-python = ">=3.8"
 license = "MIT"
-keywords = ["rate-limiting", "throttling", "middleware", "fastapi", "flask", "django"]
+keywords = ["rate-limiting", "throttling", "middleware", "fastapi", "flask", "django", "saas", "quota", "api-keys", "redis", "distributed", "observability", "opentelemetry"]
 authors = [
     { name = "Halt Contributors" }
 ]
@@ -28,6 +28,7 @@ dependencies = []
 
 [project.optional-dependencies]
 redis = ["redis>=4.0.0"]
+otel = ["opentelemetry-api>=1.20.0"]
 fastapi = ["fastapi>=0.100.0", "starlette>=0.27.0"]
 flask = ["flask>=2.0.0"]
 django = ["django>=3.2.0"]
@@ -37,6 +38,7 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "redis>=4.0.0",
     "fakeredis>=2.20.0",
+    "opentelemetry-api>=1.20.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",

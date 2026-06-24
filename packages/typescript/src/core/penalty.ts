@@ -2,6 +2,8 @@
  * Penalty system for abuse detection and progressive rate limiting.
  */
 
+import { TelemetryHooks } from './telemetry';
+
 export interface PenaltyConfig {
     threshold: number;
     duration: number;
@@ -21,7 +23,8 @@ export class PenaltyManager {
 
     constructor(
         private store: any,
-        config?: Partial<PenaltyConfig>
+        config?: Partial<PenaltyConfig>,
+        private telemetry?: TelemetryHooks
     ) {
         this.config = {
             threshold: config?.threshold ?? 10,
@@ -73,11 +76,18 @@ export class PenaltyManager {
         penalty.lastViolation = Math.floor(Date.now() / 1000);
 
         // Check if penalty should be applied
+        let penaltyTriggered = false;
         if (penalty.abuseScore >= this.config.threshold && !this.isActive(penalty)) {
             penalty.penaltyUntil = Math.floor(Date.now() / 1000) + this.config.duration;
+            penaltyTriggered = true;
         }
 
         await this.savePenalty(identifier, penalty);
+
+        this.telemetry?.onViolation?.(identifier, penalty, severity);
+        if (penaltyTriggered) {
+            this.telemetry?.onPenaltyApplied?.(identifier, penalty);
+        }
 
         return penalty;
     }
@@ -89,6 +99,8 @@ export class PenaltyManager {
             Math.floor(Date.now() / 1000) + (duration ?? this.config.duration);
 
         await this.savePenalty(identifier, penalty);
+
+        this.telemetry?.onPenaltyApplied?.(identifier, penalty);
 
         return penalty;
     }

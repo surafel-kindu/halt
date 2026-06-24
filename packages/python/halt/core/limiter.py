@@ -28,6 +28,7 @@ class RateLimiter:
         exempt_private_ips: bool = True,
         otel_tracer: Optional[Any] = None,
         metrics_recorder: Optional[Callable] = None,
+        telemetry: Optional[Any] = None,
     ) -> None:
         """Initialize rate limiter.
 
@@ -41,6 +42,8 @@ class RateLimiter:
             exempt_private_ips: Whether to exempt private IPs from rate limiting.
             otel_tracer: Optional OpenTelemetry-like tracer (has ``start_span``).
             metrics_recorder: Optional ``(name, tags, value)`` metrics hook.
+            telemetry: Optional high-level observability hooks (StatsCollector,
+                OpenTelemetryMetrics, LoggingTelemetry, or a CompositeTelemetry).
         """
         self.store = store
         self.policy_or_resolver = policy
@@ -48,9 +51,31 @@ class RateLimiter:
         self.exempt_private_ips = exempt_private_ips
         self.otel_tracer = otel_tracer
         self.metrics_recorder = metrics_recorder
+        self.telemetry = telemetry
         # Algorithm instances are built lazily per resolved policy and cached
         # (only used for the in-process path; atomic stores run Lua instead).
         self._algorithm_cache: dict = {}
+
+    def _emit_telemetry(
+        self, request: Any, key: str, decision: Decision, policy: Policy, cost: int
+    ) -> None:
+        """Fan a finished decision out to the telemetry hooks with rich metadata."""
+        if not self.telemetry:
+            return
+        algorithm = policy.algorithm
+        metadata = {
+            "policy": policy.name,
+            "algorithm": algorithm.value if hasattr(algorithm, "value") else algorithm,
+            "key_strategy": getattr(policy.key_strategy, "value", policy.key_strategy),
+            "endpoint": self._get_path(request),
+            "cost": cost,
+            "plan": policy.plan,
+        }
+        self.telemetry.on_check(key, decision, metadata)
+        if decision.allowed:
+            self.telemetry.on_allowed(key, decision, metadata)
+        else:
+            self.telemetry.on_blocked(key, decision, metadata)
 
     # ----- algorithm construction (in-process path) -----------------------
 
@@ -106,10 +131,10 @@ class RateLimiter:
 
     def _prepare(
         self, request: Any, cost: Optional[int]
-    ) -> Tuple[Optional[Decision], Optional[Policy], Optional[str], int]:
+    ) -> Tuple[Optional[Decision], Optional[Policy], Optional[str], Optional[str], int]:
         """Resolve policy, apply exemptions, and extract the storage key.
 
-        Returns ``(early_decision, policy, storage_key, cost)``. When
+        Returns ``(early_decision, policy, storage_key, raw_key, cost)``. When
         ``early_decision`` is set the caller should return it directly.
         """
         if callable(self.policy_or_resolver):
@@ -121,14 +146,14 @@ class RateLimiter:
             cost = policy.cost
 
         if self._is_exempt(request, policy):
-            return self._allow_all(policy), policy, None, cost
+            return self._allow_all(policy), policy, None, None, cost
 
         key = self._extract_key(request, policy)
         if key is None:
-            return self._allow_all(policy), policy, None, cost
+            return self._allow_all(policy), policy, None, None, cost
 
         storage_key = f"halt:{policy.name}:{key}"
-        return None, policy, storage_key, cost
+        return None, policy, storage_key, key, cost
 
     def _evaluate_args(self, policy: Policy, storage_key: str, cost: int) -> dict:
         return dict(
@@ -149,14 +174,17 @@ class RateLimiter:
         Delegates to an atomic store's ``evaluate`` when available, otherwise
         runs the algorithm in-process against the simple store.
         """
-        early, policy, storage_key, cost = self._prepare(request, cost)
+        early, policy, storage_key, raw_key, cost = self._prepare(request, cost)
         if early is not None:
             return early
 
         if hasattr(self.store, "evaluate"):
-            return self.store.evaluate(**self._evaluate_args(policy, storage_key, cost))
+            decision = self.store.evaluate(**self._evaluate_args(policy, storage_key, cost))
+        else:
+            decision = self._compute_in_app(policy, storage_key, cost)
 
-        return self._compute_in_app(policy, storage_key, cost)
+        self._emit_telemetry(request, raw_key, decision, policy, cost)
+        return decision
 
     async def acheck(self, request: Any, cost: Optional[int] = None) -> Decision:
         """Async variant of :meth:`check` for async stores / frameworks.
@@ -164,17 +192,19 @@ class RateLimiter:
         Uses an atomic store's ``aevaluate`` when available, falls back to a
         synchronous ``evaluate``, and finally to the in-process path.
         """
-        early, policy, storage_key, cost = self._prepare(request, cost)
+        early, policy, storage_key, raw_key, cost = self._prepare(request, cost)
         if early is not None:
             return early
 
         if hasattr(self.store, "aevaluate"):
-            return await self.store.aevaluate(**self._evaluate_args(policy, storage_key, cost))
+            decision = await self.store.aevaluate(**self._evaluate_args(policy, storage_key, cost))
+        elif hasattr(self.store, "evaluate"):
+            decision = self.store.evaluate(**self._evaluate_args(policy, storage_key, cost))
+        else:
+            decision = self._compute_in_app(policy, storage_key, cost)
 
-        if hasattr(self.store, "evaluate"):
-            return self.store.evaluate(**self._evaluate_args(policy, storage_key, cost))
-
-        return self._compute_in_app(policy, storage_key, cost)
+        self._emit_telemetry(request, raw_key, decision, policy, cost)
+        return decision
 
     # ----- in-process algorithm path --------------------------------------
 

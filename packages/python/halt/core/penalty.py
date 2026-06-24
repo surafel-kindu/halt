@@ -52,15 +52,22 @@ class Penalty:
 class PenaltyManager:
     """Manage penalties and abuse scores."""
     
-    def __init__(self, store: Any, config: Optional[PenaltyConfig] = None) -> None:
+    def __init__(
+        self,
+        store: Any,
+        config: Optional[PenaltyConfig] = None,
+        telemetry: Optional[Any] = None,
+    ) -> None:
         """Initialize penalty manager.
-        
+
         Args:
             store: Storage backend (any store with get/set methods)
             config: Penalty configuration (uses defaults if not provided)
+            telemetry: Optional TelemetryHooks for observability
         """
         self.store = store
         self.config = config or PenaltyConfig()
+        self.telemetry = telemetry
     
     def _get_penalty_key(self, identifier: str) -> str:
         """Generate storage key for penalty.
@@ -125,14 +132,21 @@ class PenaltyManager:
         penalty.last_violation = int(time.time())
         
         # Check if penalty should be applied
+        penalty_triggered = False
         if penalty.abuse_score >= self.config.threshold and not penalty.is_active():
             penalty.penalty_until = int(time.time()) + self.config.duration
-        
+            penalty_triggered = True
+
         # Save to storage
         self._save_penalty(identifier, penalty)
-        
+
+        if self.telemetry:
+            self.telemetry.on_violation(identifier, penalty, severity)
+            if penalty_triggered:
+                self.telemetry.on_penalty_applied(identifier, penalty)
+
         return penalty
-    
+
     def apply_penalty(self, identifier: str, duration: Optional[int] = None) -> Penalty:
         """Manually apply a penalty.
         
@@ -149,12 +163,15 @@ class PenaltyManager:
             duration = self.config.duration
         
         penalty.penalty_until = int(time.time()) + duration
-        
+
         # Save to storage
         self._save_penalty(identifier, penalty)
-        
+
+        if self.telemetry:
+            self.telemetry.on_penalty_applied(identifier, penalty)
+
         return penalty
-    
+
     def clear_penalty(self, identifier: str) -> None:
         """Clear penalty for an identifier.
         

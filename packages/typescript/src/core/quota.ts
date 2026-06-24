@@ -2,6 +2,8 @@
  * Quota management for SaaS platforms.
  */
 
+import { TelemetryHooks } from './telemetry';
+
 export enum QuotaPeriod {
     HOURLY = 'hourly',
     DAILY = 'daily',
@@ -18,7 +20,10 @@ export interface Quota {
 }
 
 export class QuotaManager {
-    constructor(private store: any) { }
+    constructor(
+        private store: any,
+        private telemetry?: TelemetryHooks
+    ) { }
 
     private getQuotaKey(identifier: string, quotaName: string): string {
         return `halt:quota:${quotaName}:${identifier}`;
@@ -99,6 +104,11 @@ export class QuotaManager {
     ): Promise<{ allowed: boolean; quota: Quota }> {
         const currentQuota = await this.getQuota(identifier, quota);
         const allowed = (currentQuota.currentUsage || 0) + cost <= currentQuota.limit;
+
+        this.telemetry?.onQuotaCheck?.(identifier, currentQuota, allowed);
+        if (!allowed) {
+            this.telemetry?.onQuotaExceeded?.(identifier, currentQuota);
+        }
 
         return { allowed, quota: currentQuota };
     }

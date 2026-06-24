@@ -58,6 +58,7 @@ GENEROUS_API = Policy(
 # Plan-based presets for SaaS platforms
 PLAN_FREE = Policy(
     name="free_plan",
+    plan="free",
     limit=100,
     window=3600,  # 100 requests per hour
     burst=120,
@@ -67,6 +68,7 @@ PLAN_FREE = Policy(
 
 PLAN_STARTER = Policy(
     name="starter_plan",
+    plan="starter",
     limit=500,
     window=3600,  # 500 requests per hour
     burst=600,
@@ -76,6 +78,7 @@ PLAN_STARTER = Policy(
 
 PLAN_PRO = Policy(
     name="pro_plan",
+    plan="pro",
     limit=2000,
     window=3600,  # 2000 requests per hour
     burst=2500,
@@ -85,6 +88,7 @@ PLAN_PRO = Policy(
 
 PLAN_BUSINESS = Policy(
     name="business_plan",
+    plan="business",
     limit=5000,
     window=3600,  # 5000 requests per hour
     burst=6000,
@@ -94,6 +98,7 @@ PLAN_BUSINESS = Policy(
 
 PLAN_ENTERPRISE = Policy(
     name="enterprise_plan",
+    plan="enterprise",
     limit=20000,
     window=3600,  # 20000 requests per hour
     burst=25000,

@@ -1,85 +1,51 @@
 <img width="100" height="100" alt="Halt logo" src="https://github.com/user-attachments/assets/53536c8e-c7a5-490e-b21e-2501887ad92c" />
 
-# Halt [Rate Limitter]
-Halt is a lightweight rate limiting middleware library for services and APIs. It's
-designed to be easy to plug into frameworks (Express, Next, FastAPI, Flask, Django)
-and flexible enough for SaaS use-cases (per-user / plan-based limits).
+# Halt
 
-Core ideas:
-- Simple policy model (limit, window, algorithm)
-- Per-request policy resolver (support per-user/plan limits)
-- Multiple algorithms: token-bucket, fixed-window, sliding-window, leaky-bucket
-- Pluggable stores: in-memory (dev), Redis/DB (production)
-- Observability hooks (OpenTelemetry / metrics recorder)
+**SaaS-aware, cross-language rate limiting for APIs and services.** One consistent model in
+**TypeScript and Python** for per-user / per-API-key / per-plan limits, quotas, weighted
+endpoints, abuse controls, distributed accuracy via atomic Redis, and built-in observability.
+Plugs into Express, Next, FastAPI, Flask, and Django.
 
-Quick highlights (what changed)
-- You can now pass a policy *resolver* when constructing a limiter. The resolver
-  receives each request and returns a `Policy` — ideal for user-specific limits.
-- The limiter accepts an optional `otelTracer` and `metricsRecorder` hook for
-  lightweight telemetry integration.
-- Adapters (Express, Next) now support the async policy resolver flow.
+📖 **Documentation & guides: [halt.afroawi.com](https://halt.afroawi.com)**
 
-Features
-- Per-user / per-plan limits via resolver
-- Telemetry hooks (OpenTelemetry spans)
-- Metrics recorder hook for counters/gauges
-- Algorithm instance caching per policy name
-- In-memory and pluggable distributed stores (Redis recommended for production)
+## Packages
 
-Storage Backends (explicit)
-- InMemory (development): `packages/typescript/src/stores/memory.ts`, `packages/python/halt/stores/memory.py`
-- PostgreSQL (production, ACID): `packages/typescript/src/stores/postgres.ts`, `packages/python/halt/stores/postgres.py`
-- MongoDB (production, TTL indexes): `packages/typescript/src/stores/mongodb.ts`, `packages/python/halt/stores/mongodb.py`
-- DynamoDB (AWS serverless): `packages/typescript/src/stores/dynamodb.ts` (Python: `packages/python/examples/postgres_example.py` shows usage)
-- Memcached (distributed cache): `packages/typescript/src/stores/memcached.ts`
-- Redis (recommended distributed store): Redis support is planned/partially stubbed in docs; implement a `RedisStore` backing with atomic ops for strict global limits (I can add this next).
+| Package | Install | Registry |
+|---|---|---|
+| TypeScript — [`packages/typescript`](packages/typescript) | `npm install halt-rate` | [npm](https://www.npmjs.com/package/halt-rate) |
+| Python — [`packages/python`](packages/python) | `pip install halt-rate` | [PyPI](https://pypi.org/project/halt-rate/) |
 
-Getting started (TypeScript)
+## Why Halt
 
-1. Install dev deps and run tests
+- **SaaS-aware**, not just "requests per IP": per-user / per-API-key / per-plan limits, quotas,
+  and weighted (cost-based) endpoints.
+- **Cross-language parity**: the same policies, algorithms, and behavior in TS and Python.
+- **Distributed & accurate**: `RedisStore` runs each check as a single-key Lua script, so limits
+  stay exact under concurrency across a fleet (sync + async in Python).
+- **Abuse controls**: progressive penalties / abuse scoring.
+- **Observability built-in**: zero-dep `StatsCollector` (blocked counts, top limited keys,
+  endpoint cost, plan consumption) plus an OpenTelemetry metrics adapter.
+
+## Quick start
+
+See the per-package READMEs ([TypeScript](packages/typescript/README.md) ·
+[Python](packages/python/README.md)) for a minimal example, and
+**[halt.afroawi.com/docs](https://halt.afroawi.com/docs)** for full usage guidance.
+
+## Development
 
 ```bash
-cd packages/typescript
-npm install
-npm test
+# TypeScript
+cd packages/typescript && npm install && npm test
+
+# Python
+cd packages/python && pip install -e ".[dev]" && pytest
 ```
 
-2. Example using a per-user policy resolver
+Distributed/Redis tests are opt-in via the `REDIS_URL` environment variable.
 
-See `packages/typescript/demo/per-user-demo.ts` for a small runnable example.
+## Contributing & License
 
-Getting started (Python)
-
-1. Create a venv and install
-
-```bash
-cd packages/python
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .[dev]
-pytest
-```
-
-2. See `packages/python/demo/per_user_demo.py` for a quick example using a resolver.
-
-Tests & Demos
-- TypeScript demos: `packages/typescript/demo`
-- Python demos: `packages/python/demo`
-- Tests: `packages/typescript/tests` and `packages/python/tests`
-
-Roadmap (short)
-- Improve distributed store implementations (Redis Lua scripts)
-- Add idempotent response middleware (optional)
-- Expand dashboards and metrics exporters
-- GraphQL support (Apollo / Graphene adapters included)
-
-If you'd like, I can add a Redis `Store` implementation and full idempotency middleware next.
-
-Support & Community
-- Discord: https://discord.gg/halt
-- GitHub Issues: https://github.com/yourusername/halt/issues
-- Documentation: https://docs.halt.dev (or ./docs)
-
-Contributing
-- Read the contribution guidelines in `CONTRIBUTING.md` and the license in `LICENSE`.
-  Open a PR against `main` and use conventional commits for clear changelogs.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Open PRs against `main` using conventional commits.
+Licensed under [MIT](LICENSE).

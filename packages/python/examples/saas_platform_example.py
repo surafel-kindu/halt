@@ -8,9 +8,9 @@ from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
 
 from halt import RateLimiter, InMemoryStore, presets
-from halt.core.quota import QuotaManager, QUOTA_FREE_MONTHLY, QUOTA_PRO_MONTHLY
-from halt.core.penalty import PenaltyManager, PENALTY_MODERATE
-from halt.core.telemetry import LoggingTelemetry, CompositeTelemetry
+from halt import QuotaManager, QUOTA_FREE_MONTHLY, QUOTA_PRO_MONTHLY
+from halt import PenaltyManager, PENALTY_MODERATE
+from halt import LoggingTelemetry, CompositeTelemetry, StatsCollector
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

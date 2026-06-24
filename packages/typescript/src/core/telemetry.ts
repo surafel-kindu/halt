@@ -26,7 +26,7 @@ export class LoggingTelemetry implements TelemetryHooks {
         );
     }
 
-    onAllowed(key: string, decision: Decision, metadata?: Record<string, any>): void {
+    onAllowed(key: string, decision: Decision, _metadata?: Record<string, any>): void {
         this.logger.info(`Request allowed: key=${key}, remaining=${decision.remaining}`);
     }
 
@@ -69,20 +69,20 @@ export class LoggingTelemetry implements TelemetryHooks {
 export class MetricsTelemetry implements TelemetryHooks {
     constructor(private metricsClient: any) { }
 
-    onCheck(key: string, decision: Decision, metadata?: Record<string, any>): void {
+    onCheck(_key: string, _decision: Decision, metadata?: Record<string, any>): void {
         this.metricsClient.increment('halt.checks.total', this.getTags(metadata));
     }
 
-    onAllowed(key: string, decision: Decision, metadata?: Record<string, any>): void {
+    onAllowed(_key: string, decision: Decision, metadata?: Record<string, any>): void {
         this.metricsClient.increment('halt.requests.allowed', this.getTags(metadata));
         this.metricsClient.gauge('halt.remaining', decision.remaining, this.getTags(metadata));
     }
 
-    onBlocked(key: string, decision: Decision, metadata?: Record<string, any>): void {
+    onBlocked(_key: string, _decision: Decision, metadata?: Record<string, any>): void {
         this.metricsClient.increment('halt.requests.blocked', this.getTags(metadata));
     }
 
-    onQuotaCheck(identifier: string, quota: Quota, allowed: boolean): void {
+    onQuotaCheck(_identifier: string, quota: Quota, _allowed: boolean): void {
         const tags = { quota: quota.name, period: quota.period };
         this.metricsClient.increment('halt.quota.checks', tags);
         this.metricsClient.gauge(
@@ -92,17 +92,17 @@ export class MetricsTelemetry implements TelemetryHooks {
         );
     }
 
-    onQuotaExceeded(identifier: string, quota: Quota): void {
+    onQuotaExceeded(_identifier: string, quota: Quota): void {
         const tags = { quota: quota.name, period: quota.period };
         this.metricsClient.increment('halt.quota.exceeded', tags);
     }
 
-    onPenaltyApplied(identifier: string, penalty: Penalty): void {
+    onPenaltyApplied(_identifier: string, penalty: Penalty): void {
         this.metricsClient.increment('halt.penalties.applied');
         this.metricsClient.gauge('halt.penalties.abuse_score', penalty.abuseScore);
     }
 
-    onViolation(identifier: string, penalty: Penalty, severity: number): void {
+    onViolation(_identifier: string, _penalty: Penalty, severity: number): void {
         this.metricsClient.increment('halt.violations.total');
         this.metricsClient.histogram('halt.violations.severity', severity);
     }

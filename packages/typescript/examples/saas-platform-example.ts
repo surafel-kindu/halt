@@ -4,12 +4,18 @@
  */
 
 import express, { Request, Response, NextFunction } from 'express';
-import { RateLimiter } from '../src/core/limiter';
-import { InMemoryStore } from '../src/stores/memory';
+import {
+    RateLimiter,
+    InMemoryStore,
+    QuotaManager,
+    QUOTA_FREE_MONTHLY,
+    QUOTA_PRO_MONTHLY,
+    PenaltyManager,
+    PENALTY_MODERATE,
+    LoggingTelemetry,
+    StatsCollector,
+} from '../src';
 import { getPlanPolicy } from '../src/presets';
-import { QuotaManager, QUOTA_FREE_MONTHLY, QUOTA_PRO_MONTHLY } from '../src/core/quota';
-import { PenaltyManager, PENALTY_MODERATE } from '../src/core/penalty';
-import { LoggingTelemetry } from '../src/core/telemetry';
 
 const app = express();
 app.use(express.json());

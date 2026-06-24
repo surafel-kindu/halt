@@ -79,13 +79,15 @@ class Quota:
 class QuotaManager:
     """Manage quotas for users/keys."""
     
-    def __init__(self, store: Any) -> None:
+    def __init__(self, store: Any, telemetry: Optional[Any] = None) -> None:
         """Initialize quota manager.
-        
+
         Args:
             store: Storage backend (any store with get/set methods)
+            telemetry: Optional TelemetryHooks for observability
         """
         self.store = store
+        self.telemetry = telemetry
     
     def _get_quota_key(self, identifier: str, quota_name: str) -> str:
         """Generate storage key for quota.
@@ -153,10 +155,15 @@ class QuotaManager:
             Tuple of (allowed, current_quota)
         """
         current_quota = self.get_quota(identifier, quota)
-        
+
         # Check if adding cost would exceed quota
         allowed = (current_quota.current_usage + cost) <= current_quota.limit
-        
+
+        if self.telemetry:
+            self.telemetry.on_quota_check(identifier, current_quota, allowed)
+            if not allowed:
+                self.telemetry.on_quota_exceeded(identifier, current_quota)
+
         return allowed, current_quota
     
     def consume_quota(
