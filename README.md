@@ -23,9 +23,13 @@ Plugs into Express, Next, FastAPI, Flask, and Django.
 - **Cross-language parity**: the same policies, algorithms, and behavior in TS and Python.
 - **Distributed & accurate**: `RedisStore` runs each check as a single-key Lua script, so limits
   stay exact under concurrency across a fleet (sync + async in Python).
+- **Dynamic limits**: change limits at runtime with a `PolicyRegistry` or a cached loader (reading
+  Redis/DB/config) — no restart.
 - **Abuse controls**: progressive penalties / abuse scoring.
 - **Observability built-in**: zero-dep `StatsCollector` (blocked counts, top limited keys,
   endpoint cost, plan consumption) plus an OpenTelemetry metrics adapter.
+- **Framework adapters**: Express, Next, Hono, Fastify, Flask, FastAPI, Django, GraphQL — with
+  edge-runtime support in TypeScript.
 
 ## Quick start
 

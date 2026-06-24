@@ -39,9 +39,17 @@ observability are covered in the docs → **[halt.afroawi.com/docs](https://halt
 - Algorithms: token bucket, fixed/sliding window, leaky bucket
 - Keys: IP, user, API key, composite, or custom
 - Atomic **Redis** store (Lua, cluster-safe, fail-open) + in-memory dev store
+- **Dynamic limits**: change limits at runtime with `PolicyRegistry` / cached loaders — no restart
 - SaaS: per-plan limits, quotas, weighted endpoints, abuse penalties
 - Observability: `StatsCollector` + OpenTelemetry metrics
-- Adapters: Express, Next.js
+- Adapters: Express, Next.js, **Hono**, **Fastify**, GraphQL (Apollo)
+
+## Runtime support
+
+Ships dual **ESM + CJS** with types. The core (limiter, algorithms, in-memory store) is
+**edge-safe** — runs on Cloudflare Workers, Deno, Bun, and Vercel Edge. `RedisStore` is Node-only
+(TCP); for edge distributed limits, inject any `RedisClientLike` (e.g. a fetch/REST client).
+Full guidance: **[halt.afroawi.com/docs](https://halt.afroawi.com/docs)**.
 
 ## Links
 

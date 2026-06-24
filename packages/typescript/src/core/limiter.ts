@@ -166,8 +166,11 @@ export class RateLimiter {
 
         const store = this.store as Store;
 
-        // Get or create algorithm instance for this policy
-        let algorithm = this.algorithmCache.get(policy.name);
+        // Get or create algorithm instance for this policy. The cache key includes
+        // the parameters that affect behavior, so changing a policy's limit/window
+        // at runtime (dynamic limits) takes effect immediately on the in-app path.
+        const cacheKey = `${policy.name}|${policy.algorithm}|${policy.limit}|${policy.window}|${policy.burst}`;
+        let algorithm = this.algorithmCache.get(cacheKey);
         if (!algorithm) {
             if (policy.algorithm === Algorithm.TOKEN_BUCKET) {
                 algorithm = new TokenBucket(policy.burst, policy.limit, policy.window);
@@ -181,7 +184,7 @@ export class RateLimiter {
             } else {
                 throw new Error(`Algorithm ${policy.algorithm} not implemented`);
             }
-            this.algorithmCache.set(policy.name, algorithm);
+            this.algorithmCache.set(cacheKey, algorithm);
         }
 
         // Instrumentation: start a span if tracer available

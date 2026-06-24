@@ -1,5 +1,6 @@
 """Main rate limiter implementation."""
 
+import inspect
 import time
 from typing import Any, Callable, Optional, Tuple, Union
 from halt.core.policy import Policy, KeyStrategy, Algorithm
@@ -129,19 +130,20 @@ class RateLimiter:
             reset_at=int(time.time() + policy.window),
         )
 
+    def _resolve_policy(self, request: Any) -> Any:
+        """Resolve the policy (may return a coroutine for async resolvers)."""
+        if callable(self.policy_or_resolver):
+            return self.policy_or_resolver(request)
+        return self.policy_or_resolver
+
     def _prepare(
-        self, request: Any, cost: Optional[int]
+        self, request: Any, policy: Policy, cost: Optional[int]
     ) -> Tuple[Optional[Decision], Optional[Policy], Optional[str], Optional[str], int]:
-        """Resolve policy, apply exemptions, and extract the storage key.
+        """Apply exemptions and extract the storage key for an already-resolved policy.
 
         Returns ``(early_decision, policy, storage_key, raw_key, cost)``. When
         ``early_decision`` is set the caller should return it directly.
         """
-        if callable(self.policy_or_resolver):
-            policy = self.policy_or_resolver(request)
-        else:
-            policy = self.policy_or_resolver
-
         if cost is None:
             cost = policy.cost
 
@@ -174,7 +176,13 @@ class RateLimiter:
         Delegates to an atomic store's ``evaluate`` when available, otherwise
         runs the algorithm in-process against the simple store.
         """
-        early, policy, storage_key, raw_key, cost = self._prepare(request, cost)
+        policy = self._resolve_policy(request)
+        if inspect.iscoroutine(policy):
+            policy.close()
+            raise RuntimeError(
+                "Async policy resolver requires acheck(): use `await limiter.acheck(request)`"
+            )
+        early, policy, storage_key, raw_key, cost = self._prepare(request, policy, cost)
         if early is not None:
             return early
 
@@ -190,9 +198,13 @@ class RateLimiter:
         """Async variant of :meth:`check` for async stores / frameworks.
 
         Uses an atomic store's ``aevaluate`` when available, falls back to a
-        synchronous ``evaluate``, and finally to the in-process path.
+        synchronous ``evaluate``, and finally to the in-process path. Supports
+        async policy resolvers (e.g. a cached loader reading Redis/DB).
         """
-        early, policy, storage_key, raw_key, cost = self._prepare(request, cost)
+        policy = self._resolve_policy(request)
+        if inspect.iscoroutine(policy):
+            policy = await policy
+        early, policy, storage_key, raw_key, cost = self._prepare(request, policy, cost)
         if early is not None:
             return early
 

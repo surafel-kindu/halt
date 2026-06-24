@@ -21,6 +21,13 @@ export {
 export * as presets from './presets';
 export * as extractors from './core/extractors';
 
+// Dynamic limits
+export {
+    PolicyRegistry,
+    cachedPolicyResolver,
+    type CachedPolicyResolverOptions,
+} from './core/registry';
+
 // SaaS features
 export {
     QuotaManager,

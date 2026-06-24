@@ -1,6 +1,6 @@
 """Halt - Rate limiting middleware with safe defaults and Redis-backed accuracy."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 from halt.core.limiter import RateLimiter
 from halt.core.policy import Policy, KeyStrategy, Algorithm
@@ -37,6 +37,9 @@ from halt.core.telemetry import (
 )
 from halt.core.stats import StatsCollector
 
+# Dynamic limits
+from halt.core.registry import PolicyRegistry, cached_policy_resolver
+
 __all__ = [
     "RateLimiter",
     "Policy",
@@ -66,6 +69,9 @@ __all__ = [
     "MetricsTelemetry",
     "CompositeTelemetry",
     "StatsCollector",
+    # Dynamic limits
+    "PolicyRegistry",
+    "cached_policy_resolver",
 ]
 
 try:
