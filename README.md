@@ -1,4 +1,4 @@
-<img width="100" height="100" alt="Halt logo" src="https://github.com/user-attachments/assets/53536c8e-c7a5-490e-b21e-2501887ad92c" />
+<img width="1983" height="793" alt="ChatGPT Image Jul 6, 2026, 04_33_44 PM" src="https://github.com/user-attachments/assets/dec288f2-2884-4070-8b30-1fc71b902d8d" />
 
 # Halt
 
@@ -7,7 +7,7 @@
 endpoints, abuse controls, distributed accuracy via atomic Redis, and built-in observability.
 Plugs into Express, Next, FastAPI, Flask, and Django.
 
-📖 **Documentation & guides: [halt.afroawi.com](https://halt.afroawi.com)**
+📖 **Documentation & guides: [https://halt.afroawi.com/docs](https://halt.afroawi.com/docs)**
 
 ## Packages
 
