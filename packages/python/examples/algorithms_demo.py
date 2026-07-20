@@ -6,19 +6,25 @@ from halt import RateLimiter, InMemoryStore, Policy, Algorithm, KeyStrategy
 import time
 
 
-def test_algorithm(algorithm: Algorithm, name: str):
+def test_algorithm(algorithm: Algorithm, name: str, sliding_precision: int | None = None):
     """Test a specific algorithm."""
     print(f"\n{'='*60}")
     print(f"Testing {name}")
     print('='*60)
-    
-    policy = Policy(
+
+    policy_kwargs = dict(
         name=name.lower().replace(' ', '_'),
         limit=5,
         window=10,  # 10 seconds
         algorithm=algorithm,
         key_strategy=KeyStrategy.IP,
     )
+
+    if algorithm == Algorithm.SLIDING_WINDOW and sliding_precision is not None:
+        policy_kwargs["sliding_precision"] = sliding_precision
+        print(f"Sliding precision: {sliding_precision}")
+
+    policy = Policy(**policy_kwargs)
     
     limiter = RateLimiter(store=InMemoryStore(), policy=policy)
     
@@ -57,8 +63,8 @@ if __name__ == "__main__":
     # Test Fixed Window
     test_algorithm(Algorithm.FIXED_WINDOW, "Fixed Window")
     
-    # Test Sliding Window
-    test_algorithm(Algorithm.SLIDING_WINDOW, "Sliding Window")
+    # Test Sliding Window with custom precision
+    test_algorithm(Algorithm.SLIDING_WINDOW, "Sliding Window", sliding_precision=20)
     
     print("\n" + "="*60)
     print("Algorithm Comparison Complete!")

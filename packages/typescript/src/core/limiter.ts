@@ -169,7 +169,7 @@ export class RateLimiter {
         // Get or create algorithm instance for this policy. The cache key includes
         // the parameters that affect behavior, so changing a policy's limit/window
         // at runtime (dynamic limits) takes effect immediately on the in-app path.
-        const cacheKey = `${policy.name}|${policy.algorithm}|${policy.limit}|${policy.window}|${policy.burst}`;
+        const cacheKey = `${policy.name}|${policy.algorithm}|${policy.limit}|${policy.window}|${policy.burst}|${policy.slidingPrecision}`;
         let algorithm = this.algorithmCache.get(cacheKey);
         if (!algorithm) {
             if (policy.algorithm === Algorithm.TOKEN_BUCKET) {
@@ -177,7 +177,7 @@ export class RateLimiter {
             } else if (policy.algorithm === Algorithm.FIXED_WINDOW) {
                 algorithm = new FixedWindow(policy.limit, policy.window);
             } else if (policy.algorithm === Algorithm.SLIDING_WINDOW) {
-                algorithm = new SlidingWindow(policy.limit, policy.window);
+                algorithm = new SlidingWindow(policy.limit, policy.window, policy.slidingPrecision);
             } else if (policy.algorithm === Algorithm.LEAKY_BUCKET) {
                 const leakRate = policy.limit / policy.window;
                 algorithm = new LeakyBucket(policy.burst, leakRate, policy.window);

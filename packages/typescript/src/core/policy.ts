@@ -30,6 +30,8 @@ export interface Policy {
     keyStrategy?: KeyStrategy;
     /** Maximum burst size (for token bucket) */
     burst?: number;
+    /** Number of sub-windows for sliding window (higher = more accurate, more memory) */
+    slidingPrecision?: number;
     /** Cost per request (default: 1) */
     cost?: number;
     /** Duration to block after limit exceeded (seconds) */
@@ -53,6 +55,7 @@ export function normalizePolicy(policy: Policy): Required<Policy> {
         algorithm: policy.algorithm ?? Algorithm.TOKEN_BUCKET,
         keyStrategy: policy.keyStrategy ?? KeyStrategy.IP,
         burst: policy.burst ?? Math.floor(policy.limit * 1.2),
+        slidingPrecision: policy.slidingPrecision ?? 10,
         cost: policy.cost ?? 1,
         blockDuration: policy.blockDuration ?? undefined,
         keyExtractor: policy.keyExtractor ?? undefined,
@@ -71,6 +74,10 @@ export function normalizePolicy(policy: Policy): Required<Policy> {
 
     if (normalized.cost <= 0) {
         throw new Error('cost must be positive');
+    }
+
+    if (!Number.isInteger(normalized.slidingPrecision) || normalized.slidingPrecision <= 0) {
+        throw new Error('slidingPrecision must be a positive integer');
     }
 
     if (normalized.burst < normalized.limit) {

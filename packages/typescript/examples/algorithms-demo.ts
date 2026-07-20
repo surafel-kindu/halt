@@ -8,7 +8,11 @@ function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function testAlgorithm(algorithm: Algorithm, name: string): Promise<void> {
+async function testAlgorithm(
+    algorithm: Algorithm,
+    name: string,
+    slidingPrecision?: number
+): Promise<void> {
     console.log('\n' + '='.repeat(60));
     console.log(`Testing ${name}`);
     console.log('='.repeat(60));
@@ -19,7 +23,14 @@ async function testAlgorithm(algorithm: Algorithm, name: string): Promise<void> 
         window: 10, // 10 seconds
         algorithm,
         keyStrategy: KeyStrategy.IP,
+        ...(algorithm === Algorithm.SLIDING_WINDOW && slidingPrecision
+            ? { slidingPrecision }
+            : {}),
     };
+
+    if (algorithm === Algorithm.SLIDING_WINDOW && slidingPrecision) {
+        console.log(`Sliding precision: ${slidingPrecision}`);
+    }
 
     const limiter = new RateLimiter({
         store: new InMemoryStore(),
@@ -34,7 +45,7 @@ async function testAlgorithm(algorithm: Algorithm, name: string): Promise<void> 
 
     // Make 7 requests
     for (let i = 0; i < 7; i++) {
-        const decision = limiter.check(request);
+        const decision = await limiter.check(request);
 
         const status = decision.allowed ? '✅ ALLOWED' : '❌ BLOCKED';
         console.log(`Request ${i + 1}: ${status}`);
@@ -62,8 +73,8 @@ async function main() {
     // Test Fixed Window
     await testAlgorithm(Algorithm.FIXED_WINDOW, 'Fixed Window');
 
-    // Test Sliding Window
-    await testAlgorithm(Algorithm.SLIDING_WINDOW, 'Sliding Window');
+    // Test Sliding Window with custom precision
+    await testAlgorithm(Algorithm.SLIDING_WINDOW, 'Sliding Window', 20);
 
     console.log('\n' + '='.repeat(60));
     console.log('Algorithm Comparison Complete!');

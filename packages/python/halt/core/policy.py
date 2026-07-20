@@ -35,6 +35,7 @@ class Policy:
         algorithm: Rate limiting algorithm to use
         key_strategy: Strategy for extracting the rate limit key
         burst: Maximum burst size (for token bucket)
+        sliding_precision: Number of sub-windows for sliding window
         cost: Cost per request (default: 1)
         block_duration: Duration to block after limit exceeded (seconds)
         key_extractor: Custom function to extract key from request
@@ -47,6 +48,7 @@ class Policy:
     algorithm: Algorithm = Algorithm.TOKEN_BUCKET
     key_strategy: KeyStrategy = KeyStrategy.IP
     burst: Optional[int] = None
+    sliding_precision: int = 10
     cost: int = 1
     block_duration: Optional[int] = None
     key_extractor: Optional[Callable[[Any], Optional[str]]] = None
@@ -67,6 +69,9 @@ class Policy:
         
         if self.cost <= 0:
             raise ValueError("cost must be positive")
+
+        if self.sliding_precision <= 0:
+            raise ValueError("sliding_precision must be positive")
         
         if self.burst < self.limit:
             raise ValueError("burst must be >= limit")

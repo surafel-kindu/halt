@@ -92,6 +92,7 @@ class RateLimiter:
             policy.limit,
             policy.window,
             policy.burst,
+            policy.sliding_precision,
         )
         algorithm = self._algorithm_cache.get(cache_key)
         if algorithm is not None:
@@ -106,7 +107,11 @@ class RateLimiter:
         elif policy.algorithm == Algorithm.FIXED_WINDOW:
             algorithm = FixedWindow(limit=policy.limit, window=policy.window)
         elif policy.algorithm == Algorithm.SLIDING_WINDOW:
-            algorithm = SlidingWindow(limit=policy.limit, window=policy.window)
+            algorithm = SlidingWindow(
+                limit=policy.limit,
+                window=policy.window,
+                precision=policy.sliding_precision,
+            )
         elif policy.algorithm == Algorithm.LEAKY_BUCKET:
             leak_rate = policy.limit / policy.window
             algorithm = LeakyBucket(
