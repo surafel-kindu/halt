@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "halt-rate"
-version = "0.5.1"
+version = "0.5.0"
 description = "SaaS-aware, cross-language rate limiting: per-user/API-key/plan limits, quotas, weighted endpoints, abuse controls, atomic Redis, and built-in observability"
 readme = "README.md"
 requires-python = ">=3.8"

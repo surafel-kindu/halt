@@ -1,6 +1,6 @@
 """Halt - Rate limiting middleware with safe defaults and Redis-backed accuracy."""
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 from halt.core.limiter import RateLimiter
 from halt.core.policy import Policy, KeyStrategy, Algorithm
