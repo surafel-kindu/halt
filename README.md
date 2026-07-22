@@ -11,10 +11,10 @@ Plugs into Express, Next, FastAPI, Flask, and Django.
 
 ## Packages
 
-| Package | Install | Registry |
-|---|---|---|
-| TypeScript — [`packages/typescript`](packages/typescript) | `npm install halt-rate` | [npm](https://www.npmjs.com/package/halt-rate) |
-| Python — [`packages/python`](packages/python) | `pip install halt-rate` | [PyPI](https://pypi.org/project/halt-rate/) |
+| Package | Install | Registry | Installs |
+|---|---|---|---|
+| TypeScript — [`packages/typescript`](packages/typescript) | `npm install halt-rate` | [npm](https://www.npmjs.com/package/halt-rate) | ![NPM Downloads](https://img.shields.io/npm/d18m/halt-rate?style=flat-square&labelColor=blue&color=orange) |
+| Python — [`packages/python`](packages/python) | `pip install halt-rate` | [PyPI](https://pypi.org/project/halt-rate/) | [![PyPI Downloads](https://static.pepy.tech/personalized-badge/halt-rate?period=total&units=NONE&left_color=BLUE&right_color=RED&left_text=downloads)](https://pepy.tech/projects/halt-rate) |
 
 ## Why Halt
 
